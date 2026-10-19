@@ -22,6 +22,12 @@ import (
 
 const (
 	TermExecuteMaxCommandLen = 8000
+	// How long we let an already-running shell finish before giving up on
+	// delivering into it. The model has no "wait" tool, so failing immediately
+	// just makes it retry in a tight loop against a terminal that is busy for
+	// perfectly ordinary reasons (a find, a build, a download).
+	termExecuteBusyWait     = 10 * time.Second
+	termExecutePollInterval = 400 * time.Millisecond
 )
 
 type TermExecuteCommandToolInput struct {
@@ -123,6 +129,34 @@ func typeCommandIntoTerminal(fullBlockId string, command string) error {
 	)
 }
 
+// waitForShellIdle blocks until the block's shell is no longer running a
+// command, or until the budget runs out. Typing into a busy shell is unsafe:
+// the keystrokes land in whatever process is reading stdin, not in the shell.
+//
+// When shell integration is off there is no state to read, so we report idle
+// immediately and let the user see the result.
+func waitForShellIdle(blockORef waveobj.ORef) (string, string, error) {
+	deadline := time.Now().Add(termExecuteBusyWait)
+	for {
+		rtInfo := wstore.GetRTInfo(blockORef)
+		shellState := ""
+		lastCmd := ""
+		if rtInfo != nil {
+			shellState = rtInfo.ShellState
+			lastCmd = rtInfo.ShellLastCmd
+		}
+		if shellState != "running-command" {
+			return shellState, "", nil
+		}
+		if time.Now().After(deadline) {
+			return shellState, lastCmd, fmt.Errorf(
+				"the shell was still busy with %q after waiting %s; it may be waiting for input or running something long. Check the terminal, then try a more targeted command",
+				lastCmd, termExecuteBusyWait)
+		}
+		time.Sleep(termExecutePollInterval)
+	}
+}
+
 func runTermExecuteCommand(tabId string, input any) (*TermExecuteCommandToolOutput, error) {
 	parsed, err := parseTermExecuteCommandInput(input)
 	if err != nil {
@@ -156,13 +190,9 @@ func runTermExecuteCommand(tabId string, input any) (*TermExecuteCommandToolOutp
 	}
 
 	blockORef := waveobj.MakeORef(waveobj.OType_Block, fullBlockId)
-	rtInfo := wstore.GetRTInfo(blockORef)
-	shellState := ""
-	if rtInfo != nil {
-		shellState = rtInfo.ShellState
-		if shellState == "running-command" {
-			return nil, fmt.Errorf("the shell in %s is still running the previous command (%s); wait for it to finish, then retry", parsed.WidgetId, rtInfo.ShellLastCmd)
-		}
+	shellState, _, err := waitForShellIdle(blockORef)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := typeCommandIntoTerminal(fullBlockId, command); err != nil {
@@ -186,6 +216,7 @@ func GetTermExecuteCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 			`Type a shell command into one of the user's terminal widgets and press Enter, as if the user had typed it themselves.`,
 			`The keystrokes are delivered to the real terminal, so the command is visible in the terminal and its output lands in that terminal's scrollback.`,
 			`This requires user approval. After the command runs, read the result with term_get_scrollback (or term_command_output) before drawing conclusions -- never guess at command output.`,
+			`If the shell is busy running something else, this call waits up to 10 seconds for it to finish before giving up. A timeout means the command genuinely did not run: check term_get_scrollback to see what the terminal is doing, then try a narrower command. Do not repeat the same command blindly.`,
 			`The command is typed verbatim. There is no shell interpolation performed on your behalf, so quote and escape exactly as you want bash to see it.`,
 			`Only use this when the user has asked you to act. Do not run commands speculatively.`,
 		}, " "),
