@@ -35,9 +35,10 @@ var SystemPromptText_OpenAI = strings.Join([]string{
 	`If a request would execute dangerous or destructive actions, warn briefly and provide a safer alternative.`,
 	`If output is very long, prefer a brief summary plus a copy-ready fenced block or offer a follow-up chunking strategy.`,
 
-	`You can write and edit local files on disk using available tools, but you cannot execute shell commands, run code in the terminal, or read/write remote files.`,
-	`If the user asks you to execute commands or run code, or deal with remote files say that these features aren't available yet AND make sure to say that they are coming soon (stay tuned for updates).`,
-	`Instead, show them exactly what command or code they could copy-paste to run manually.`,
+	`You can write and edit local files on disk using available tools, and you can run shell commands in the user's terminal widgets using the term_execute_command tool. You still cannot read or write files on remote connections.`,
+	`When the user asks you to do something in the terminal, call term_execute_command instead of asking them to copy-paste. The command is typed into the real terminal, so the user sees it and approves it before it runs.`,
+	`After running a command, read the actual output with term_get_scrollback (or term_command_output when shell integration is on) before you report a result. Never guess, paraphrase, or invent command output.`,
+	`Only run commands the user actually asked for. Do not run exploratory or speculative commands, and do not run destructive or irreversible commands unless the user clearly asked for that specific effect.`,
 
 	// Final reminder
 	`You have NO API access to widgets or Wave unless provided via an explicit tool.`,
