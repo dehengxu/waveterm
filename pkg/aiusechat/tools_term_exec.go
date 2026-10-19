@@ -99,8 +99,14 @@ func verifyTermExecuteCommandInput(input any, _ *uctypes.UIMessageDataToolUse) e
 
 // typeCommandIntoTerminal delivers the command to the terminal block's pty exactly
 // the way a keystroke would, which is the same call the frontend term view uses
-// (RpcApi.ControllerInputCommand). Appending \r submits it.
-func typeCommandIntoTerminal(fullBlockId string, command string) error {
+// (RpcApi.ControllerInputCommand on TabRpcClient). Appending \r submits it.
+//
+// The route must be the tab route, matching what the frontend passes. The
+// controllerinput command is dispatched by the Wave server itself (it looks the
+// block controller up by BlockId), so routing at a block ("feblock:" or
+// "controller:") makes the router look for the command on a link that does not
+// implement it and fail with "rpc command not supported by [...]".
+func typeCommandIntoTerminal(tabId string, fullBlockId string, command string) error {
 	payload := command + "\r"
 	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
 
@@ -110,7 +116,7 @@ func typeCommandIntoTerminal(fullBlockId string, command string) error {
 			BlockId:     fullBlockId,
 			InputData64: encoded,
 		},
-		&wshrpc.RpcOpts{Route: wshutil.MakeFeBlockRouteId(fullBlockId)},
+		&wshrpc.RpcOpts{Route: wshutil.MakeTabRouteId(tabId)},
 	)
 }
 
@@ -156,7 +162,7 @@ func runTermExecuteCommand(tabId string, input any) (*TermExecuteCommandToolOutp
 		}
 	}
 
-	if err := typeCommandIntoTerminal(fullBlockId, command); err != nil {
+	if err := typeCommandIntoTerminal(tabId, fullBlockId, command); err != nil {
 		return nil, fmt.Errorf("failed to send command to terminal %s: %w", parsed.WidgetId, err)
 	}
 
