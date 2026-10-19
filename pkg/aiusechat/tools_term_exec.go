@@ -17,7 +17,6 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wcore"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
 	"github.com/wavetermdev/waveterm/pkg/wstore"
 )
 
@@ -99,14 +98,18 @@ func verifyTermExecuteCommandInput(input any, _ *uctypes.UIMessageDataToolUse) e
 
 // typeCommandIntoTerminal delivers the command to the terminal block's pty exactly
 // the way a keystroke would, which is the same call the frontend term view uses
-// (RpcApi.ControllerInputCommand on TabRpcClient). Appending \r submits it.
+// (RpcApi.ControllerInputCommand). Appending \r submits it.
 //
-// The route must be the tab route, matching what the frontend passes. The
-// controllerinput command is dispatched by the Wave server itself (it looks the
-// block controller up by BlockId), so routing at a block ("feblock:" or
-// "controller:") makes the router look for the command on a link that does not
-// implement it and fail with "rpc command not supported by [...]".
-func typeCommandIntoTerminal(tabId string, fullBlockId string, command string) error {
+// Deliberately no RpcOpts.Route. GetBareRpcClient() is an in-process client
+// registered against the local WshServerImpl, and ControllerInputCommand is one
+// of the methods that implementation exposes, so a nil opts dispatches straight
+// to the process that owns the block controller. Setting a route sends the
+// message somewhere else instead, and both plausible guesses fail:
+// "feblock:<blockid>" resolves to a link with no such command, and
+// "tab:<tabid>" resolves to the frontend TabClient, which also has no such
+// command. Either way the router replies
+// `rpc command "controllerinput" not supported by [...]`.
+func typeCommandIntoTerminal(fullBlockId string, command string) error {
 	payload := command + "\r"
 	encoded := base64.StdEncoding.EncodeToString([]byte(payload))
 
@@ -116,7 +119,7 @@ func typeCommandIntoTerminal(tabId string, fullBlockId string, command string) e
 			BlockId:     fullBlockId,
 			InputData64: encoded,
 		},
-		&wshrpc.RpcOpts{Route: wshutil.MakeTabRouteId(tabId)},
+		nil,
 	)
 }
 
@@ -162,7 +165,7 @@ func runTermExecuteCommand(tabId string, input any) (*TermExecuteCommandToolOutp
 		}
 	}
 
-	if err := typeCommandIntoTerminal(tabId, fullBlockId, command); err != nil {
+	if err := typeCommandIntoTerminal(fullBlockId, command); err != nil {
 		return nil, fmt.Errorf("failed to send command to terminal %s: %w", parsed.WidgetId, err)
 	}
 
