@@ -15,6 +15,7 @@ bin/
 *~
 out/
 make/
+make-dev/
 artifacts/
 mikework/
 aiplans/
