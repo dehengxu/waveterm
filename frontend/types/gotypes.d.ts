@@ -1404,6 +1404,7 @@ declare global {
         "ai:fixedfontsize"?: number;
         "waveai:showcloudmodes"?: boolean;
         "waveai:defaultmode"?: string;
+        "waveai:autotools"?: string[];
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
@@ -1589,6 +1590,7 @@ declare global {
         "debug:panictype"?: string;
         "block:view"?: string;
         "block:controller"?: string;
+        "block:subblock"?: boolean;
         "ai:backendtype"?: string;
         "ai:local"?: boolean;
         "wsh:cmd"?: string;

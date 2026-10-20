@@ -101,6 +101,12 @@
         "waveai:defaultmode": {
           "type": "string"
         },
+        "waveai:autotools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "term:*": {
           "type": "boolean"
         },

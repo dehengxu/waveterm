@@ -264,6 +264,17 @@ func CreateToolUseData(toolCallID, toolName string, arguments string, chatOpts u
 
 	if toolDef.ToolApproval != nil {
 		toolUseData.Approval = toolDef.ToolApproval(parsedArgs)
+		// The user allowed this tool to run without a prompt (either for this
+		// session or permanently). Mark it auto-approved so the request skips
+		// the approval round trip entirely.
+		if toolUseData.Approval == uctypes.ApprovalNeedsApproval {
+			for _, autoTool := range chatOpts.AutoApproveTools {
+				if autoTool == toolName {
+					toolUseData.Approval = uctypes.ApprovalAutoApproved
+					break
+				}
+			}
+		}
 	}
 
 	if chatOpts.TabId != "" {

@@ -89,29 +89,33 @@ type SettingsType struct {
 
 	WaveAiShowCloudModes bool   `json:"waveai:showcloudmodes,omitempty"`
 	WaveAiDefaultMode    string `json:"waveai:defaultmode,omitempty"`
+	// WaveAiAutoTools lists AI tool names the user has permanently allowed to
+	// run without an approval prompt. Entries come from the "Approved Forever"
+	// control in the AI panel.
+	WaveAiAutoTools []string `json:"waveai:autotools,omitempty"`
 
-	TermClear               bool     `json:"term:*,omitempty"`
-	TermFontSize            float64  `json:"term:fontsize,omitempty"`
-	TermFontFamily          string   `json:"term:fontfamily,omitempty"`
-	TermTheme               string   `json:"term:theme,omitempty"`
-	TermDisableWebGl        bool     `json:"term:disablewebgl,omitempty"`
-	TermLocalShellPath      string   `json:"term:localshellpath,omitempty"`
-	TermLocalShellOpts      []string `json:"term:localshellopts,omitempty"`
-	TermGitBashPath         string   `json:"term:gitbashpath,omitempty"`
-	TermScrollback          *int64   `json:"term:scrollback,omitempty"`
-	TermCopyOnSelect        *bool    `json:"term:copyonselect,omitempty"`
-	TermTransparency        *float64 `json:"term:transparency,omitempty"`
-	TermAllowBracketedPaste *bool    `json:"term:allowbracketedpaste,omitempty"`
-	TermShiftEnterNewline   *bool    `json:"term:shiftenternewline,omitempty"`
-	TermMacOptionIsMeta     *bool    `json:"term:macoptionismeta,omitempty"`
-	TermCursor              string   `json:"term:cursor,omitempty"`
-	TermCursorBlink         *bool    `json:"term:cursorblink,omitempty"`
-	TermBellSound           *bool    `json:"term:bellsound,omitempty"`
-	TermBellIndicator       *bool    `json:"term:bellindicator,omitempty"`
-	TermOsc52               string   `json:"term:osc52,omitempty" jsonschema:"enum=focus,enum=always"`
-	TermDurable                    *bool    `json:"term:durable,omitempty"`
-	TermShowSplitButtons           bool     `json:"term:showsplitbuttons,omitempty"`
-	TermTrimTrailingWhitespace     *bool    `json:"term:trimtrailingwhitespace,omitempty"`
+	TermClear                  bool     `json:"term:*,omitempty"`
+	TermFontSize               float64  `json:"term:fontsize,omitempty"`
+	TermFontFamily             string   `json:"term:fontfamily,omitempty"`
+	TermTheme                  string   `json:"term:theme,omitempty"`
+	TermDisableWebGl           bool     `json:"term:disablewebgl,omitempty"`
+	TermLocalShellPath         string   `json:"term:localshellpath,omitempty"`
+	TermLocalShellOpts         []string `json:"term:localshellopts,omitempty"`
+	TermGitBashPath            string   `json:"term:gitbashpath,omitempty"`
+	TermScrollback             *int64   `json:"term:scrollback,omitempty"`
+	TermCopyOnSelect           *bool    `json:"term:copyonselect,omitempty"`
+	TermTransparency           *float64 `json:"term:transparency,omitempty"`
+	TermAllowBracketedPaste    *bool    `json:"term:allowbracketedpaste,omitempty"`
+	TermShiftEnterNewline      *bool    `json:"term:shiftenternewline,omitempty"`
+	TermMacOptionIsMeta        *bool    `json:"term:macoptionismeta,omitempty"`
+	TermCursor                 string   `json:"term:cursor,omitempty"`
+	TermCursorBlink            *bool    `json:"term:cursorblink,omitempty"`
+	TermBellSound              *bool    `json:"term:bellsound,omitempty"`
+	TermBellIndicator          *bool    `json:"term:bellindicator,omitempty"`
+	TermOsc52                  string   `json:"term:osc52,omitempty" jsonschema:"enum=focus,enum=always"`
+	TermDurable                *bool    `json:"term:durable,omitempty"`
+	TermShowSplitButtons       bool     `json:"term:showsplitbuttons,omitempty"`
+	TermTrimTrailingWhitespace *bool    `json:"term:trimtrailingwhitespace,omitempty"`
 
 	EditorMinimapEnabled      bool    `json:"editor:minimapenabled,omitempty"`
 	EditorStickyScrollEnabled bool    `json:"editor:stickyscrollenabled,omitempty"`
@@ -868,6 +872,16 @@ func SetBaseConfigValue(toMerge waveobj.MetaMapType) error {
 				rtype = reflect.TypeOf(val)
 			}
 			if rtype != ctype {
+				if ctype.Kind() == reflect.Slice && rtype.Kind() == reflect.Slice {
+					// JSON-decoded values arrive as []interface{}, so convert them
+					// into the target slice type (e.g. []string).
+					convertedVal, err := convertJsonSlice(val, ctype)
+					if err != nil {
+						return fmt.Errorf("cannot convert %s: %v", configKey, err)
+					}
+					m[configKey] = convertedVal
+					continue
+				}
 				if ctype == reflect.PointerTo(rtype) {
 					m[configKey] = &val
 				} else {
@@ -878,6 +892,28 @@ func SetBaseConfigValue(toMerge waveobj.MetaMapType) error {
 		}
 	}
 	return WriteWaveHomeConfigFile(SettingsFile, m)
+}
+
+// convertJsonSlice converts a JSON-decoded slice (always []interface{}) into
+// the target slice type declared on the config struct.
+func convertJsonSlice(val any, ctype reflect.Type) (any, error) {
+	srcVal := reflect.ValueOf(val)
+	if srcVal.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("not a slice: %T", val)
+	}
+	elemType := ctype.Elem()
+	dst := reflect.MakeSlice(ctype, 0, srcVal.Len())
+	for i := 0; i < srcVal.Len(); i++ {
+		item := srcVal.Index(i)
+		if !item.Type().AssignableTo(elemType) {
+			if !item.Type().ConvertibleTo(elemType) {
+				return nil, fmt.Errorf("invalid item type %s for %s", item.Type(), ctype)
+			}
+			item = item.Convert(elemType)
+		}
+		dst = reflect.Append(dst, item)
+	}
+	return dst.Interface(), nil
 }
 
 func SetConnectionsConfigValue(connName string, toMerge waveobj.MetaMapType) error {

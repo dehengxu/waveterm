@@ -510,6 +510,11 @@ type WaveChatOpts struct {
 	AllowNativeWebSearch bool
 	BuilderId            string
 	BuilderAppId         string
+	// AutoApproveTools lists tool names that are allowed to run without an
+	// approval prompt for this conversation. It is the union of the
+	// session-scoped list sent by the client and the persisted
+	// waveai:autotools setting.
+	AutoApproveTools []string
 
 	// ephemeral to the step
 	TabState       string

@@ -4,6 +4,7 @@
 import { formatFileSizeError, isAcceptableFile, validateFileSize } from "@/app/aipanel/ai-utils";
 import { waveAIHasFocusWithin } from "@/app/aipanel/waveai-focus-utils";
 import { type WaveAIModel } from "@/app/aipanel/waveai-model";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import { Tooltip } from "@/element/tooltip";
 import { cn } from "@/util/util";
 import { useAtom, useAtomValue } from "jotai";
@@ -28,6 +29,23 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const isPanelOpen = useAtomValue(model.getPanelVisibleAtom());
+    const pendingApproval = useAtomValue(model.pendingApprovalAtom);
+    const sessionAutoTools = useAtomValue(model.sessionAutoToolsAtom);
+    const foreverAutoTools = useAtomValue(getSettingsKeyAtom("waveai:autotools")) ?? [];
+
+    // The tools that are waiting for the user right now. The two permission
+    // buttons on the left of the input apply to these.
+    const pendingToolnames = pendingApproval == null ? [] : Object.keys(pendingApproval.byTool);
+    const hasPendingApproval = pendingToolnames.length > 0;
+    const sessionActive = hasPendingApproval && pendingToolnames.some((name) => sessionAutoTools.includes(name));
+    const foreverActive = hasPendingApproval && pendingToolnames.some((name) => foreverAutoTools.includes(name));
+    const pendingLabel = pendingToolnames.join(", ");
+    const everyTimeTooltip = hasPendingApproval
+        ? `Approve Every Time — allow ${pendingLabel} without asking for the rest of this chat`
+        : "Approve Every Time — no tool is waiting for approval";
+    const foreverTooltip = hasPendingApproval
+        ? `Approved Forever — always allow ${pendingLabel} without asking`
+        : "Approved Forever — no tool is waiting for approval";
 
     let placeholder: string;
     if (!isChatEmpty) {
@@ -143,61 +161,103 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
                 className="hidden"
             />
             <form onSubmit={onSubmit}>
-                <div className="relative">
-                    <textarea
-                        ref={textareaRef}
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        onFocus={handleFocus}
-                        onBlur={handleBlur}
-                        placeholder={placeholder}
-                        className={cn(
-                            "w-full  text-white px-2 py-2 pr-5 focus:outline-none resize-none overflow-auto bg-zinc-800/50"
-                        )}
-                        style={{ fontSize: "13px" }}
-                        rows={2}
-                    />
-                    <Tooltip content="Attach files" placement="top" divClassName="absolute bottom-6.5 right-1">
-                        <button
-                            type="button"
-                            onClick={handleUploadClick}
-                            className={cn(
-                                "w-5 h-5 transition-colors flex items-center justify-center text-gray-400 hover:text-accent cursor-pointer"
-                            )}
-                        >
-                            <i className="fa fa-paperclip text-sm"></i>
-                        </button>
-                    </Tooltip>
-                    {status === "streaming" ? (
-                        <Tooltip content="Stop Response" placement="top" divClassName="absolute bottom-1.5 right-1">
+                <div className="flex items-stretch">
+                    <div className="flex flex-col justify-end gap-0.5 pl-1.5 pb-2 shrink-0">
+                        <Tooltip content={everyTimeTooltip} placement="right">
                             <button
                                 type="button"
-                                onClick={() => model.stopResponse()}
+                                onClick={() => model.approveEveryTime()}
+                                disabled={!hasPendingApproval}
                                 className={cn(
-                                    "w-5 h-5 transition-colors flex items-center justify-center",
-                                    "text-green-500 hover:text-green-400 cursor-pointer"
+                                    "w-5 h-5 rounded transition-colors flex items-center justify-center",
+                                    !hasPendingApproval
+                                        ? "text-gray-600 cursor-not-allowed"
+                                        : sessionActive
+                                          ? "text-accent hover:text-accent/80 cursor-pointer"
+                                          : "text-gray-400 hover:text-accent cursor-pointer"
                                 )}
                             >
-                                <i className="fa fa-square text-sm"></i>
+                                <i className="fa fa-rotate-right text-sm"></i>
                             </button>
                         </Tooltip>
-                    ) : (
-                        <Tooltip content="Send message (Enter)" placement="top" divClassName="absolute bottom-1.5 right-1">
+                        <Tooltip content={foreverTooltip} placement="right">
                             <button
-                                type="submit"
-                                disabled={status !== "ready" || !input.trim()}
+                                type="button"
+                                onClick={() => model.approveForever()}
+                                disabled={!hasPendingApproval}
                                 className={cn(
-                                    "w-5 h-5 transition-colors flex items-center justify-center",
-                                    status !== "ready" || !input.trim()
-                                        ? "text-gray-400"
-                                        : "text-accent/80 hover:text-accent cursor-pointer"
+                                    "w-5 h-5 rounded transition-colors flex items-center justify-center",
+                                    !hasPendingApproval
+                                        ? "text-gray-600 cursor-not-allowed"
+                                        : foreverActive
+                                          ? "text-accent hover:text-accent/80 cursor-pointer"
+                                          : "text-gray-400 hover:text-accent cursor-pointer"
                                 )}
                             >
-                                <i className="fa fa-paper-plane text-sm"></i>
+                                <i className="fa fa-infinity text-sm"></i>
                             </button>
                         </Tooltip>
-                    )}
+                    </div>
+                    <div className="relative flex-1 min-w-0">
+                        <textarea
+                            ref={textareaRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            onFocus={handleFocus}
+                            onBlur={handleBlur}
+                            placeholder={placeholder}
+                            className={cn(
+                                "w-full  text-white px-2 py-2 pr-5 focus:outline-none resize-none overflow-auto bg-zinc-800/50"
+                            )}
+                            style={{ fontSize: "13px" }}
+                            rows={2}
+                        />
+                        <Tooltip content="Attach files" placement="top" divClassName="absolute bottom-6.5 right-1">
+                            <button
+                                type="button"
+                                onClick={handleUploadClick}
+                                className={cn(
+                                    "w-5 h-5 transition-colors flex items-center justify-center text-gray-400 hover:text-accent cursor-pointer"
+                                )}
+                            >
+                                <i className="fa fa-paperclip text-sm"></i>
+                            </button>
+                        </Tooltip>
+                        {status === "streaming" ? (
+                            <Tooltip content="Stop Response" placement="top" divClassName="absolute bottom-1.5 right-1">
+                                <button
+                                    type="button"
+                                    onClick={() => model.stopResponse()}
+                                    className={cn(
+                                        "w-5 h-5 transition-colors flex items-center justify-center",
+                                        "text-green-500 hover:text-green-400 cursor-pointer"
+                                    )}
+                                >
+                                    <i className="fa fa-square text-sm"></i>
+                                </button>
+                            </Tooltip>
+                        ) : (
+                            <Tooltip
+                                content="Send message (Enter)"
+                                placement="top"
+                                divClassName="absolute bottom-1.5 right-1"
+                            >
+                                <button
+                                    type="submit"
+                                    disabled={status !== "ready" || !input.trim()}
+                                    className={cn(
+                                        "w-5 h-5 transition-colors flex items-center justify-center",
+                                        status !== "ready" || !input.trim()
+                                            ? "text-gray-400"
+                                            : "text-accent/80 hover:text-accent cursor-pointer"
+                                    )}
+                                >
+                                    <i className="fa fa-paper-plane text-sm"></i>
+                                </button>
+                            </Tooltip>
+                        )}
+                    </div>
                 </div>
             </form>
         </div>

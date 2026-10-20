@@ -30,6 +30,7 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/waveappstore"
 	"github.com/wavetermdev/waveterm/pkg/wavebase"
 	"github.com/wavetermdev/waveterm/pkg/waveobj"
+	"github.com/wavetermdev/waveterm/pkg/wconfig"
 	"github.com/wavetermdev/waveterm/pkg/web/sse"
 	"github.com/wavetermdev/waveterm/pkg/wps"
 	"github.com/wavetermdev/waveterm/pkg/wstore"
@@ -630,6 +631,34 @@ type PostMessageRequest struct {
 	Msg          uctypes.AIMessage `json:"msg"`
 	WidgetAccess bool              `json:"widgetaccess,omitempty"`
 	AIMode       string            `json:"aimode"`
+	// AutoApproveTools lists tool names the user has allowed to run without a
+	// prompt for this session only ("Approve Every Time"). It is merged with
+	// the persisted waveai:autotools setting.
+	AutoApproveTools []string `json:"autoapptools,omitempty"`
+}
+
+// resolveAutoApproveTools merges the session-scoped list sent by the client
+// ("Approve Every Time") with the persisted waveai:autotools setting
+// ("Approved Forever"). The result is the set of tool names that run without
+// an approval prompt.
+func resolveAutoApproveTools(sessionTools []string) []string {
+	result := make([]string, 0, len(sessionTools))
+	seen := make(map[string]bool)
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		result = append(result, name)
+	}
+	for _, name := range sessionTools {
+		add(name)
+	}
+	fullConfig := wconfig.GetWatcher().GetFullConfig()
+	for _, name := range fullConfig.Settings.WaveAiAutoTools {
+		add(name)
+	}
+	return result
 }
 
 func WaveAIPostMessageHandler(w http.ResponseWriter, r *http.Request) {
@@ -691,6 +720,7 @@ func WaveAIPostMessageHandler(w http.ResponseWriter, r *http.Request) {
 		AllowNativeWebSearch: true,
 		BuilderId:            req.BuilderId,
 		BuilderAppId:         req.BuilderAppId,
+		AutoApproveTools:     resolveAutoApproveTools(req.AutoApproveTools),
 	}
 	chatOpts.SystemPrompt = getSystemPrompt(chatOpts.Config.APIType, chatOpts.Config.Model, chatOpts.BuilderId != "", chatOpts.Config.HasCapability(uctypes.AICapabilityTools), chatOpts.WidgetAccess)
 

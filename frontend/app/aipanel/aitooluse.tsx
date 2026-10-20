@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BlockModel } from "@/app/block/block-model";
-import { Modal } from "@/app/modals/modal";
 import { recordTEvent } from "@/app/store/global";
 import { cn, fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
@@ -146,10 +145,25 @@ interface AIToolUseBatchProps {
 
 const AIToolUseBatch = memo(({ parts, isStreaming }: AIToolUseBatchProps) => {
     const [userApprovalOverride, setUserApprovalOverride] = useState<string | null>(null);
+    const model = WaveAIModel.getInstance();
+    const approvedToolCalls = useAtomValue(model.approvedToolCallsAtom);
+    const batchApproved = parts.every((part) => approvedToolCalls.includes(part.data.toolcallid));
 
     const firstTool = parts[0].data;
-    const baseApproval = userApprovalOverride || firstTool.approval;
+    const baseApproval = userApprovalOverride || (batchApproved ? "user-approved" : firstTool.approval);
     const effectiveApproval = getEffectiveApprovalStatus(baseApproval, isStreaming);
+
+    const batchToolCallIds = parts.map((part) => part.data.toolcallid);
+
+    useEffect(() => {
+        if (effectiveApproval === "needs-approval") {
+            parts.forEach((part) => {
+                model.registerPendingApproval(part.data.toolname, [part.data.toolcallid]);
+            });
+        } else {
+            model.clearPendingApproval(batchToolCallIds);
+        }
+    }, [model, parts, effectiveApproval]);
 
     const handleApprove = () => {
         setUserApprovalOverride("user-approved");
@@ -194,6 +208,8 @@ const AIToolUse = memo(({ part, isStreaming }: AIToolUseProps) => {
     const [userApprovalOverride, setUserApprovalOverride] = useState<string | null>(null);
     const model = WaveAIModel.getInstance();
     const restoreModalToolCallId = useAtomValue(model.restoreBackupModalToolCallId);
+    const approvedToolCalls = useAtomValue(model.approvedToolCallsAtom);
+    const locallyApproved = approvedToolCalls.includes(toolData.toolcallid);
     const showRestoreModal = restoreModalToolCallId === toolData.toolcallid;
     const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const highlightedBlockIdRef = useRef<string | null>(null);
@@ -202,10 +218,21 @@ const AIToolUse = memo(({ part, isStreaming }: AIToolUseProps) => {
     const statusColor =
         toolData.status === "completed" ? "text-success" : toolData.status === "error" ? "text-error" : "text-gray-400";
 
-    const baseApproval = userApprovalOverride || toolData.approval;
+    const baseApproval = userApprovalOverride || (locallyApproved ? "user-approved" : toolData.approval);
     const effectiveApproval = getEffectiveApprovalStatus(baseApproval, isStreaming);
 
     const isFileWriteTool = toolData.toolname === "write_text_file" || toolData.toolname === "edit_text_file";
+
+    // Keep the model informed about which tool call is waiting for approval so
+    // that the "Approve Every Time" / "Approved Forever" buttons in the input
+    // area know what they apply to.
+    useEffect(() => {
+        if (effectiveApproval === "needs-approval") {
+            model.registerPendingApproval(toolData.toolname, [toolData.toolcallid]);
+        } else {
+            model.clearPendingApproval([toolData.toolcallid]);
+        }
+    }, [model, toolData.toolname, toolData.toolcallid, effectiveApproval]);
 
     useEffect(() => {
         return () => {

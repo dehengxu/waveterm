@@ -41,6 +41,13 @@ export interface DroppedFile {
     previewUrl?: string;
 }
 
+// Tool calls that are currently waiting for the user to approve them, keyed by
+// tool name. The "Approve Every Time" / "Approved Forever" buttons in the AI
+// input area act on everything in here.
+export interface PendingApprovalInfo {
+    byTool: { [toolname: string]: string[] };
+}
+
 const BuilderAIModeConfigs: Record<string, AIModeConfigType> = {
     "waveaibuilder@default": {
         "display:name": "Builder Default",
@@ -96,6 +103,18 @@ export class WaveAIModel {
     >;
     restoreBackupStatus: jotai.PrimitiveAtom<"idle" | "processing" | "success" | "error"> = jotai.atom("idle");
     restoreBackupError: jotai.PrimitiveAtom<string> = jotai.atom(null) as jotai.PrimitiveAtom<string>;
+
+    // Tool names the user allowed to run without a prompt for this session only
+    // ("Approve Every Time"). Sent with every message as autoapptools.
+    sessionAutoToolsAtom: jotai.PrimitiveAtom<string[]> = jotai.atom([]) as jotai.PrimitiveAtom<string[]>;
+    // The tool calls that are currently waiting for the user to approve them,
+    // keyed by tool name.
+    pendingApprovalAtom: jotai.PrimitiveAtom<PendingApprovalInfo | null> = jotai.atom(
+        null
+    ) as jotai.PrimitiveAtom<PendingApprovalInfo | null>;
+    // Tool calls the user approved from the input box buttons. The server also
+    // pushes an updated tool-use part, but this makes the UI react instantly.
+    approvedToolCallsAtom: jotai.PrimitiveAtom<string[]> = jotai.atom([]) as jotai.PrimitiveAtom<string[]>;
 
     private constructor(orefContext: ORef, inBuilder: boolean) {
         this.orefContext = orefContext;
@@ -635,6 +654,149 @@ export class WaveAIModel {
             toolcallid: toolcallid,
             approval: approval,
         });
+    }
+
+    // ---- tool approval / auto-approve helpers ----
+
+    getPendingApproval(): PendingApprovalInfo | null {
+        return globalStore.get(this.pendingApprovalAtom);
+    }
+
+    // Register a tool call that is waiting for the user to approve it.
+    registerPendingApproval(toolname: string, toolcallids: string[]) {
+        if (!toolname || toolcallids.length === 0) {
+            return;
+        }
+        const current = globalStore.get(this.pendingApprovalAtom);
+        const byTool = { ...(current?.byTool ?? {}) };
+        const existing = byTool[toolname] ?? [];
+        const merged = Array.from(new Set([...existing, ...toolcallids]));
+        if (merged.length === existing.length) {
+            return;
+        }
+        byTool[toolname] = merged;
+        globalStore.set(this.pendingApprovalAtom, { byTool });
+    }
+
+    // Forget tool calls that no longer need an approval (approved, denied or timed out).
+    clearPendingApproval(toolcallids: string[]) {
+        if (toolcallids.length === 0) {
+            return;
+        }
+        const current = globalStore.get(this.pendingApprovalAtom);
+        if (current == null) {
+            return;
+        }
+        const byTool: { [toolname: string]: string[] } = {};
+        let changed = false;
+        for (const toolname of Object.keys(current.byTool)) {
+            const ids = current.byTool[toolname];
+            const remaining = ids.filter((id) => !toolcallids.includes(id));
+            if (remaining.length !== ids.length) {
+                changed = true;
+            }
+            if (remaining.length > 0) {
+                byTool[toolname] = remaining;
+            }
+        }
+        if (!changed) {
+            return;
+        }
+        const remainingTools = Object.keys(byTool);
+        globalStore.set(this.pendingApprovalAtom, remainingTools.length === 0 ? null : { byTool });
+    }
+
+    getSessionAutoTools(): string[] {
+        return globalStore.get(this.sessionAutoToolsAtom) ?? [];
+    }
+
+    isSessionAutoTool(toolname: string): boolean {
+        return this.getSessionAutoTools().includes(toolname);
+    }
+
+    addSessionAutoTool(toolname: string) {
+        if (!toolname) {
+            return;
+        }
+        const current = this.getSessionAutoTools();
+        if (current.includes(toolname)) {
+            return;
+        }
+        globalStore.set(this.sessionAutoToolsAtom, [...current, toolname]);
+    }
+
+    getForeverAutoTools(): string[] {
+        return globalStore.get(getSettingsKeyAtom("waveai:autotools")) ?? [];
+    }
+
+    isForeverAutoTool(toolname: string): boolean {
+        return this.getForeverAutoTools().includes(toolname);
+    }
+
+    async addForeverAutoTool(toolname: string) {
+        if (!toolname) {
+            return;
+        }
+        const current = this.getForeverAutoTools();
+        if (current.includes(toolname)) {
+            return;
+        }
+        await RpcApi.SetConfigCommand(TabRpcClient, { "waveai:autotools": [...current, toolname] });
+    }
+
+    isToolCallApproved(toolcallid: string): boolean {
+        return (globalStore.get(this.approvedToolCallsAtom) ?? []).includes(toolcallid);
+    }
+
+    private markToolCallsApproved(toolcallids: string[]) {
+        if (toolcallids.length === 0) {
+            return;
+        }
+        const current = globalStore.get(this.approvedToolCallsAtom) ?? [];
+        globalStore.set(this.approvedToolCallsAtom, Array.from(new Set([...current, ...toolcallids])));
+    }
+
+    // "Approve Every Time": allow the pending tool for the rest of this session
+    // and approve the calls that are waiting right now.
+    approveEveryTime() {
+        const pending = globalStore.get(this.pendingApprovalAtom);
+        if (pending == null) {
+            return;
+        }
+        const toolnames = Object.keys(pending.byTool);
+        const toolcallids = toolnames.flatMap((name) => pending.byTool[name]);
+        if (toolcallids.length === 0) {
+            return;
+        }
+        toolnames.forEach((name) => this.addSessionAutoTool(name));
+        this.markToolCallsApproved(toolcallids);
+        toolcallids.forEach((id) => this.toolUseSendApproval(id, "user-approved"));
+        this.clearPendingApproval(toolcallids);
+    }
+
+    // "Approved Forever": same as approveEveryTime, but the allow-list is
+    // persisted to settings.json (waveai:autotools).
+    async approveForever() {
+        const pending = globalStore.get(this.pendingApprovalAtom);
+        if (pending == null) {
+            return;
+        }
+        const toolnames = Object.keys(pending.byTool);
+        const toolcallids = toolnames.flatMap((name) => pending.byTool[name]);
+        if (toolcallids.length === 0) {
+            return;
+        }
+        for (const name of toolnames) {
+            try {
+                await this.addForeverAutoTool(name);
+            } catch (e) {
+                console.error("Failed to persist auto-approve tool:", name, e);
+                this.setError(`Failed to save auto-approve setting for ${name}`);
+            }
+        }
+        this.markToolCallsApproved(toolcallids);
+        toolcallids.forEach((id) => this.toolUseSendApproval(id, "user-approved"));
+        this.clearPendingApproval(toolcallids);
     }
 
     async openDiff(fileName: string, toolcallid: string) {
