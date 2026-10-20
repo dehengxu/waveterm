@@ -905,6 +905,14 @@ func convertJsonSlice(val any, ctype reflect.Type) (any, error) {
 	dst := reflect.MakeSlice(ctype, 0, srcVal.Len())
 	for i := 0; i < srcVal.Len(); i++ {
 		item := srcVal.Index(i)
+		// elements of a []interface{} have the static type interface{}, so
+		// unwrap them to get at the actual value
+		for item.Kind() == reflect.Interface {
+			if item.IsNil() {
+				return nil, fmt.Errorf("nil item at index %d for %s", i, ctype)
+			}
+			item = item.Elem()
+		}
 		if !item.Type().AssignableTo(elemType) {
 			if !item.Type().ConvertibleTo(elemType) {
 				return nil, fmt.Errorf("invalid item type %s for %s", item.Type(), ctype)

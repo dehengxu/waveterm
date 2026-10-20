@@ -791,7 +791,8 @@ export class WaveAIModel {
                 await this.addForeverAutoTool(name);
             } catch (e) {
                 console.error("Failed to persist auto-approve tool:", name, e);
-                this.setError(`Failed to save auto-approve setting for ${name}`);
+                const msg = e?.message || String(e);
+                this.setError(`Failed to save auto-approve setting for ${name}: ${msg}`);
             }
         }
         this.markToolCallsApproved(toolcallids);
