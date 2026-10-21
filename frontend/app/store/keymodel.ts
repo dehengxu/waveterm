@@ -426,6 +426,11 @@ function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
         console.log("handle activeChord", activeChord);
         // If we're in chord mode, look for the second key.
         const chordBindings = globalChordMap.get(activeChord);
+        if (chordBindings == null) {
+            // the chord was rebound while it was active
+            resetChord();
+            return true;
+        }
         const [, handler] = checkKeyMap(waveEvent, chordBindings);
         if (handler) {
             resetChord();
@@ -536,52 +541,56 @@ function countTermBlocks(): number {
     return count;
 }
 
-function registerGlobalKeys() {
-    globalKeyMap.set("Cmd:]", () => {
-        switchTab(1);
-        return true;
-    });
-    globalKeyMap.set("Shift:Cmd:]", () => {
-        switchTab(1);
-        return true;
-    });
-    globalKeyMap.set("Cmd:[", () => {
-        switchTab(-1);
-        return true;
-    });
-    globalKeyMap.set("Shift:Cmd:[", () => {
-        switchTab(-1);
-        return true;
-    });
-    globalKeyMap.set("Cmd:n", () => {
-        handleCmdN();
-        return true;
-    });
-    globalKeyMap.set("Cmd:d", () => {
-        handleSplitHorizontal("after");
-        return true;
-    });
-    globalKeyMap.set("Shift:Cmd:d", () => {
-        handleSplitVertical("after");
-        return true;
-    });
-    globalKeyMap.set("Cmd:i", () => {
-        handleCmdI();
-        return true;
-    });
-    globalKeyMap.set("Cmd:t", () => {
-        createTab();
-        return true;
-    });
-    globalKeyMap.set("Cmd:w", () => {
-        genericClose();
-        return true;
-    });
-    globalKeyMap.set("Cmd:Shift:w", () => {
-        simpleCloseStaticTab();
-        return true;
-    });
-    globalKeyMap.set("Cmd:m", () => {
+// ── Command registry ────────────────────────────────────────────────
+//
+// Every function shortcut is described by a CommandDef so that it can be
+// rebound from the Keybindings settings page. The defaults live in code, the
+// user overrides live in the "functions" section of keybindings.json and
+// only store the difference, so commands added upstream never invalidate an
+// existing user config.
+
+type CommandGroup = "tabs" | "layout" | "navigation" | "search" | "ai" | "terminal" | "misc";
+
+const CommandGroupLabels: Record<CommandGroup, string> = {
+    tabs: "标签页",
+    layout: "布局与块",
+    navigation: "焦点导航",
+    search: "搜索",
+    ai: "Wave AI",
+    terminal: "终端",
+    misc: "其他",
+};
+
+type CommandDef = {
+    id: string;
+    group: CommandGroup;
+    label: string;
+    // built-in bindings -- a user override replaces all of them
+    defaultKeys: string[];
+    handler?: KeyHandler;
+    // true for the prefix of a chord (e.g. "Ctrl:Shift:s")
+    chordPrefix?: boolean;
+    // set on the second-level keys of a chord
+    chordSubKey?: string;
+    // the chord prefix command this command belongs to
+    chordId?: string;
+    // fixed commands are dispatched by the app menu and cannot be rebound
+    fixed?: boolean;
+};
+
+type FunctionBindings = {
+    // command id -> effective keys (empty when the command is disabled)
+    commandKeys: Map<string, string[]>;
+    // key -> command id
+    keyOwners: Map<string, string>;
+    // command id -> the command whose key it took over
+    conflicts: Map<string, string>;
+    // command ids that this build does not know about
+    unknownCommands: string[];
+};
+
+function makeMagnifyHandler(): KeyHandler {
+    return () => {
         const layoutModel = getLayoutModelForStaticTab();
         const focusedNode = globalStore.get(layoutModel.focusedNode);
         if (focusedNode != null) {
@@ -593,73 +602,22 @@ function registerGlobalKeys() {
             }
         }
         return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowUp", () => {
+    };
+}
+
+function makeArrowNavHandler(direction: NavigateDirection): KeyHandler {
+    return () => {
         const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
         if (disableCtrlShiftArrows) {
             return false;
         }
-        switchBlockInDirection(NavigateDirection.Up);
+        switchBlockInDirection(direction);
         return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowDown", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Down);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowLeft", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Left);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowRight", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Right);
-        return true;
-    });
-    // Vim-style aliases for block focus navigation.
-    globalKeyMap.set("Ctrl:Shift:h", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Left);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:j", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Down);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:k", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Up);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:l", () => {
-        const disableCtrlShiftArrows = globalStore.get(getSettingsKeyAtom("app:disablectrlshiftarrows"));
-        if (disableCtrlShiftArrows) {
-            return false;
-        }
-        switchBlockInDirection(NavigateDirection.Right);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:x", () => {
+    };
+}
+
+function makeReplaceWithLauncherHandler(): KeyHandler {
+    return () => {
         const blockId = getFocusedBlockId();
         if (blockId == null) {
             return true;
@@ -674,24 +632,33 @@ function registerGlobalKeys() {
             true
         );
         return true;
-    });
-    globalKeyMap.set("F2", () => {
+    };
+}
+
+function makeRenameTabHandler(): KeyHandler {
+    return () => {
         const tabModel = getActiveTabModel();
         if (tabModel?.startRenameCallback != null) {
             tabModel.startRenameCallback();
             return true;
         }
         return false;
-    });
-    globalKeyMap.set("Cmd:g", () => {
+    };
+}
+
+function makeSwitchConnectionHandler(): KeyHandler {
+    return () => {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm.openSwitchConnection != null) {
             recordTEvent("action:other", { "action:type": "conndropdown", "action:initiator": "keyboard" });
             bcm.openSwitchConnection();
             return true;
         }
-    });
-    globalKeyMap.set("Ctrl:Shift:i", () => {
+    };
+}
+
+function makeToggleTermMultiInputHandler(): KeyHandler {
+    return () => {
         const tabModel = getActiveTabModel();
         if (tabModel == null) {
             return true;
@@ -703,70 +670,89 @@ function registerGlobalKeys() {
         }
         globalStore.set(tabModel.isTermMultiInput, !curMI);
         return true;
-    });
-    for (let idx = 1; idx <= 9; idx++) {
-        globalKeyMap.set(`Cmd:${idx}`, () => {
-            switchTabAbs(idx);
-            return true;
-        });
-        globalKeyMap.set(`Ctrl:Shift:c{Digit${idx}}`, () => {
-            switchBlockByBlockNum(idx);
-            return true;
-        });
-        globalKeyMap.set(`Ctrl:Shift:c{Numpad${idx}}`, () => {
-            switchBlockByBlockNum(idx);
-            return true;
-        });
-    }
+    };
+}
+
+function makeSwitchTabAbsHandler(index: number): KeyHandler {
+    return () => {
+        switchTabAbs(index);
+        return true;
+    };
+}
+
+function makeSwitchBlockByNumHandler(index: number): KeyHandler {
+    return () => {
+        switchBlockByBlockNum(index);
+        return true;
+    };
+}
+
+function makeFocusAiInputHandler(): KeyHandler {
+    return () => {
+        WaveAIModel.getInstance().focusInput();
+        return true;
+    };
+}
+
+// The AI focus shortcut is Ctrl+Shift+0 on macOS/Linux and Alt+0 on Windows.
+function getAiFocusDefaultKeys(): string[] {
     if (isWindows()) {
-        globalKeyMap.set("Alt:c{Digit0}", () => {
-            WaveAIModel.getInstance().focusInput();
-            return true;
-        });
-        globalKeyMap.set("Alt:c{Numpad0}", () => {
-            WaveAIModel.getInstance().focusInput();
-            return true;
-        });
-    } else {
-        globalKeyMap.set("Ctrl:Shift:c{Digit0}", () => {
-            WaveAIModel.getInstance().focusInput();
-            return true;
-        });
-        globalKeyMap.set("Ctrl:Shift:c{Numpad0}", () => {
-            WaveAIModel.getInstance().focusInput();
-            return true;
-        });
+        return ["Alt:c{Digit0}", "Alt:c{Numpad0}"];
     }
-    function activateSearch(event: WaveKeyboardEvent): boolean {
-        const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
-        // Ctrl+f is reserved in most shells
-        if (event.control && bcm.viewModel.viewType == "term") {
-            return false;
+    return ["Ctrl:Shift:c{Digit0}", "Ctrl:Shift:c{Numpad0}"];
+}
+
+function makeToggleAiPanelHandler(): KeyHandler {
+    return () => {
+        const currentVisible = WorkspaceLayoutModel.getInstance().getAIPanelVisible();
+        WorkspaceLayoutModel.getInstance().setAIPanelVisible(!currentVisible);
+        return true;
+    };
+}
+
+function makeSplitBlockHandler(axis: "horizontal" | "vertical", position: "before" | "after"): KeyHandler {
+    return () => {
+        if (axis === "vertical") {
+            handleSplitVertical(position);
+        } else {
+            handleSplitHorizontal(position);
         }
-        if (bcm.viewModel.searchAtoms) {
-            if (globalStore.get(bcm.viewModel.searchAtoms.isOpen)) {
-                // Already open — increment the focusInput counter so this block's
-                // SearchComponent focuses its own input (avoids a global DOM query
-                // that could target the wrong block when multiple searches are open).
-                const cur = globalStore.get(bcm.viewModel.searchAtoms.focusInput) as number;
-                globalStore.set(bcm.viewModel.searchAtoms.focusInput, cur + 1);
-            } else {
-                globalStore.set(bcm.viewModel.searchAtoms.isOpen, true);
-            }
-            return true;
-        }
+        return true;
+    };
+}
+
+function activateSearch(event: WaveKeyboardEvent): boolean {
+    const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
+    // Ctrl+f is reserved in most shells
+    if (event.control && bcm.viewModel.viewType == "term") {
         return false;
     }
-    function deactivateSearch(): boolean {
-        const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
-        if (bcm.viewModel.searchAtoms && globalStore.get(bcm.viewModel.searchAtoms.isOpen)) {
-            globalStore.set(bcm.viewModel.searchAtoms.isOpen, false);
-            return true;
+    if (bcm.viewModel.searchAtoms) {
+        if (globalStore.get(bcm.viewModel.searchAtoms.isOpen)) {
+            // Already open — increment the focusInput counter so this block's
+            // SearchComponent focuses its own input (avoids a global DOM query
+            // that could target the wrong block when multiple searches are open).
+            const cur = globalStore.get(bcm.viewModel.searchAtoms.focusInput) as number;
+            globalStore.set(bcm.viewModel.searchAtoms.focusInput, cur + 1);
+        } else {
+            globalStore.set(bcm.viewModel.searchAtoms.isOpen, true);
         }
-        return false;
+        return true;
     }
-    globalKeyMap.set("Cmd:f", activateSearch);
-    globalKeyMap.set("Escape", () => {
+    return false;
+}
+
+function deactivateSearch(): boolean {
+    const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
+    if (bcm.viewModel.searchAtoms && globalStore.get(bcm.viewModel.searchAtoms.isOpen)) {
+        globalStore.set(bcm.viewModel.searchAtoms.isOpen, false);
+        return true;
+    }
+    return false;
+}
+
+function makeEscapeHandler(): KeyHandler {
+    return () => {
         if (modalsModel.hasOpenModals()) {
             modalsModel.popModal();
             return true;
@@ -775,35 +761,470 @@ function registerGlobalKeys() {
             return true;
         }
         return false;
-    });
-    globalKeyMap.set("Cmd:Shift:a", () => {
-        const currentVisible = WorkspaceLayoutModel.getInstance().getAIPanelVisible();
-        WorkspaceLayoutModel.getInstance().setAIPanelVisible(!currentVisible);
-        return true;
-    });
+    };
+}
+
+let commandDefsCache: CommandDef[] = null;
+
+// The registry is built lazily because one of the default bindings depends
+// on the platform, which is only known once the window is initialized.
+function getCommandDefs(): CommandDef[] {
+    if (commandDefsCache != null) {
+        return commandDefsCache;
+    }
+    const chordId = "wave.block.split.chord";
+    const defs: CommandDef[] = [
+        // ── tabs ──
+        {
+            id: "wave.tab.next",
+            group: "tabs",
+            label: "切换到下一个标签页",
+            defaultKeys: ["Cmd:]", "Shift:Cmd:]"],
+            handler: () => {
+                switchTab(1);
+                return true;
+            },
+        },
+        {
+            id: "wave.tab.prev",
+            group: "tabs",
+            label: "切换到上一个标签页",
+            defaultKeys: ["Cmd:[", "Shift:Cmd:["],
+            handler: () => {
+                switchTab(-1);
+                return true;
+            },
+        },
+        {
+            id: "wave.tab.new",
+            group: "tabs",
+            label: "新建标签页",
+            defaultKeys: ["Cmd:t"],
+            handler: () => {
+                createTab();
+                return true;
+            },
+        },
+        {
+            id: "wave.tab.close",
+            group: "tabs",
+            label: "关闭当前标签页",
+            defaultKeys: ["Cmd:Shift:w"],
+            handler: () => {
+                simpleCloseStaticTab();
+                return true;
+            },
+        },
+        {
+            id: "wave.tab.rename",
+            group: "tabs",
+            label: "重命名当前标签页",
+            defaultKeys: ["F2"],
+            handler: makeRenameTabHandler(),
+        },
+        // ── layout ──
+        {
+            id: "wave.block.new",
+            group: "layout",
+            label: "新建块",
+            defaultKeys: ["Cmd:n"],
+            handler: () => {
+                handleCmdN();
+                return true;
+            },
+        },
+        {
+            id: "wave.block.split.right",
+            group: "layout",
+            label: "在右侧分割块",
+            defaultKeys: ["Cmd:d"],
+            handler: () => {
+                handleSplitHorizontal("after");
+                return true;
+            },
+        },
+        {
+            id: "wave.block.split.bottom",
+            group: "layout",
+            label: "在下方分割块",
+            defaultKeys: ["Shift:Cmd:d"],
+            handler: () => {
+                handleSplitVertical("after");
+                return true;
+            },
+        },
+        {
+            id: "wave.block.magnify",
+            group: "layout",
+            label: "放大 / 还原当前块",
+            defaultKeys: ["Cmd:m"],
+            handler: makeMagnifyHandler(),
+        },
+        {
+            id: "wave.block.replace.launcher",
+            group: "layout",
+            label: "用启动器替换当前块",
+            defaultKeys: ["Ctrl:Shift:x"],
+            handler: makeReplaceWithLauncherHandler(),
+        },
+        {
+            id: chordId,
+            group: "layout",
+            label: "分割块组合键前缀",
+            defaultKeys: ["Ctrl:Shift:s"],
+            chordPrefix: true,
+        },
+        {
+            id: "wave.block.split.up",
+            group: "layout",
+            label: "在上方分割块",
+            defaultKeys: [],
+            chordId: chordId,
+            chordSubKey: "ArrowUp",
+            handler: makeSplitBlockHandler("vertical", "before"),
+        },
+        {
+            id: "wave.block.split.down",
+            group: "layout",
+            label: "在下方分割块",
+            defaultKeys: [],
+            chordId: chordId,
+            chordSubKey: "ArrowDown",
+            handler: makeSplitBlockHandler("vertical", "after"),
+        },
+        {
+            id: "wave.block.split.left",
+            group: "layout",
+            label: "在左侧分割块",
+            defaultKeys: [],
+            chordId: chordId,
+            chordSubKey: "ArrowLeft",
+            handler: makeSplitBlockHandler("horizontal", "before"),
+        },
+        {
+            id: "wave.block.split.right.chord",
+            group: "layout",
+            label: "在右侧分割块",
+            defaultKeys: [],
+            chordId: chordId,
+            chordSubKey: "ArrowRight",
+            handler: makeSplitBlockHandler("horizontal", "after"),
+        },
+        // ── navigation ──
+        {
+            id: "wave.focus.up",
+            group: "navigation",
+            label: "焦点移到上方的块",
+            defaultKeys: ["Ctrl:Shift:ArrowUp"],
+            handler: makeArrowNavHandler(NavigateDirection.Up),
+        },
+        {
+            id: "wave.focus.down",
+            group: "navigation",
+            label: "焦点移到下方的块",
+            defaultKeys: ["Ctrl:Shift:ArrowDown"],
+            handler: makeArrowNavHandler(NavigateDirection.Down),
+        },
+        {
+            id: "wave.focus.left",
+            group: "navigation",
+            label: "焦点移到左侧的块",
+            defaultKeys: ["Ctrl:Shift:ArrowLeft"],
+            handler: makeArrowNavHandler(NavigateDirection.Left),
+        },
+        {
+            id: "wave.focus.right",
+            group: "navigation",
+            label: "焦点移到右侧的块",
+            defaultKeys: ["Ctrl:Shift:ArrowRight"],
+            handler: makeArrowNavHandler(NavigateDirection.Right),
+        },
+        {
+            id: "wave.focus.left.vim",
+            group: "navigation",
+            label: "焦点移到左侧的块（vim 风格）",
+            defaultKeys: ["Ctrl:Shift:h"],
+            handler: makeArrowNavHandler(NavigateDirection.Left),
+        },
+        {
+            id: "wave.focus.down.vim",
+            group: "navigation",
+            label: "焦点移到下方的块（vim 风格）",
+            defaultKeys: ["Ctrl:Shift:j"],
+            handler: makeArrowNavHandler(NavigateDirection.Down),
+        },
+        {
+            id: "wave.focus.up.vim",
+            group: "navigation",
+            label: "焦点移到上方的块（vim 风格）",
+            defaultKeys: ["Ctrl:Shift:k"],
+            handler: makeArrowNavHandler(NavigateDirection.Up),
+        },
+        {
+            id: "wave.focus.right.vim",
+            group: "navigation",
+            label: "焦点移到右侧的块（vim 风格）",
+            defaultKeys: ["Ctrl:Shift:l"],
+            handler: makeArrowNavHandler(NavigateDirection.Right),
+        },
+        // ── search ──
+        {
+            id: "wave.search.toggle",
+            group: "search",
+            label: "打开块内搜索",
+            defaultKeys: ["Cmd:f"],
+            handler: activateSearch,
+        },
+        {
+            id: "wave.escape",
+            group: "search",
+            label: "关闭弹窗 / 退出搜索",
+            defaultKeys: ["Escape"],
+            handler: makeEscapeHandler(),
+        },
+        // ── ai ──
+        {
+            id: "wave.ai.panel.toggle",
+            group: "ai",
+            label: "显示 / 隐藏 AI 面板",
+            defaultKeys: ["Cmd:Shift:a"],
+            handler: makeToggleAiPanelHandler(),
+        },
+        {
+            id: "wave.ai.focus",
+            group: "ai",
+            label: "聚焦 AI 输入框",
+            defaultKeys: getAiFocusDefaultKeys(),
+            handler: makeFocusAiInputHandler(),
+        },
+        // ── terminal ──
+        {
+            id: "wave.term.focus",
+            group: "terminal",
+            label: "聚焦当前块的输入",
+            defaultKeys: ["Cmd:i"],
+            handler: () => {
+                handleCmdI();
+                return true;
+            },
+        },
+        {
+            id: "wave.term.multiinput",
+            group: "terminal",
+            label: "切换终端多输入模式",
+            defaultKeys: ["Ctrl:Shift:i"],
+            handler: makeToggleTermMultiInputHandler(),
+        },
+        // ── misc ──
+        {
+            id: "wave.close",
+            group: "misc",
+            label: "关闭当前块（最后一个块时关闭标签页）",
+            defaultKeys: ["Cmd:w"],
+            handler: () => {
+                genericClose();
+                return true;
+            },
+        },
+        {
+            id: "wave.conn.switch",
+            group: "misc",
+            label: "打开连接切换器",
+            defaultKeys: ["Cmd:g"],
+            handler: makeSwitchConnectionHandler(),
+        },
+        {
+            id: "wave.settings.open",
+            group: "misc",
+            label: "打开设置",
+            defaultKeys: ["Cmd:,"],
+            // handled by the Electron app menu accelerator, not by the keymap
+            fixed: true,
+        },
+    ];
+    for (let idx = 1; idx <= 9; idx++) {
+        defs.push({
+            id: `wave.tab.switch.${idx}`,
+            group: "tabs",
+            label: `切换到第 ${idx} 个标签页`,
+            defaultKeys: [`Cmd:${idx}`],
+            handler: makeSwitchTabAbsHandler(idx),
+        });
+        defs.push({
+            id: `wave.block.switch.${idx}`,
+            group: "navigation",
+            label: `切换到第 ${idx} 个块`,
+            defaultKeys: [`Ctrl:Shift:c{Digit${idx}}`, `Ctrl:Shift:c{Numpad${idx}}`],
+            handler: makeSwitchBlockByNumHandler(idx),
+        });
+    }
+    commandDefsCache = defs;
+    return defs;
+}
+
+// Resolves the effective keybinding for every command: the built-in
+// defaults, overridden by the user's "functions" section. An empty
+// override disables the command.
+function computeFunctionBindings(overrides: Record<string, string>): FunctionBindings {
+    const defs = getCommandDefs();
+    const defById = new Map<string, CommandDef>();
+    for (const def of defs) {
+        defById.set(def.id, def);
+    }
+    const commandKeys = new Map<string, string[]>();
+    const keyOwners = new Map<string, string>();
+    const conflicts = new Map<string, string>();
+    const unknownCommands: string[] = [];
+
+    for (const def of defs) {
+        if (def.chordSubKey) {
+            // only reachable through its chord prefix
+            commandKeys.set(def.id, []);
+            continue;
+        }
+        const keys = [...def.defaultKeys];
+        for (const key of keys) {
+            if (!keyOwners.has(key)) {
+                keyOwners.set(key, def.id);
+            }
+        }
+        commandKeys.set(def.id, keys);
+    }
+
+    for (const [commandId, rawKey] of Object.entries(overrides ?? {})) {
+        const def = defById.get(commandId);
+        if (def == null) {
+            unknownCommands.push(commandId);
+            continue;
+        }
+        if (def.fixed || def.chordSubKey) {
+            // not rebindable
+            continue;
+        }
+        const key = (rawKey ?? "").trim();
+        if (key !== "") {
+            const reservedOwner = keyOwners.get(key);
+            if (reservedOwner != null && defById.get(reservedOwner)?.fixed) {
+                // reserved by an app menu accelerator -- ignore the override
+                continue;
+            }
+        }
+        // release the keys this command used to own
+        for (const oldKey of commandKeys.get(commandId) ?? []) {
+            if (keyOwners.get(oldKey) === commandId) {
+                keyOwners.delete(oldKey);
+            }
+        }
+        if (key === "") {
+            // an empty value disables the command
+            commandKeys.set(commandId, []);
+            continue;
+        }
+        const prevOwner = keyOwners.get(key);
+        if (prevOwner != null && prevOwner !== commandId) {
+            // the user override wins, the displaced command loses its binding
+            conflicts.set(commandId, prevOwner);
+            commandKeys.set(
+                prevOwner,
+                (commandKeys.get(prevOwner) ?? []).filter((k) => k !== key)
+            );
+        }
+        keyOwners.set(key, commandId);
+        commandKeys.set(commandId, [key]);
+    }
+    return { commandKeys, keyOwners, conflicts, unknownCommands };
+}
+
+function buildEffectiveKeyMaps(overrides: Record<string, string>): {
+    keyMap: Map<string, KeyHandler>;
+    chordMap: Map<string, Map<string, KeyHandler>>;
+} {
+    const defs = getCommandDefs();
+    const defById = new Map<string, CommandDef>();
+    for (const def of defs) {
+        defById.set(def.id, def);
+    }
+    const bindings = computeFunctionBindings(overrides);
+    const keyMap = new Map<string, KeyHandler>();
+    for (const [key, commandId] of bindings.keyOwners) {
+        const def = defById.get(commandId);
+        if (def == null || def.fixed || def.chordPrefix) {
+            continue;
+        }
+        if (def.handler) {
+            keyMap.set(key, def.handler);
+        }
+    }
+    const chordMap = new Map<string, Map<string, KeyHandler>>();
+    for (const def of defs) {
+        if (!def.chordPrefix) {
+            continue;
+        }
+        for (const prefix of bindings.commandKeys.get(def.id) ?? []) {
+            const subs = new Map<string, KeyHandler>();
+            for (const subDef of defs) {
+                if (subDef.chordId !== def.id || subDef.chordSubKey == null || subDef.handler == null) {
+                    continue;
+                }
+                subs.set(subDef.chordSubKey, subDef.handler);
+            }
+            chordMap.set(prefix, subs);
+        }
+    }
+    return { keyMap, chordMap };
+}
+
+function getFunctionOverrides(): Record<string, string> {
+    const fullConfig = globalStore.get(atoms.fullConfigAtom);
+    return fullConfig?.keybindings?.functions ?? {};
+}
+
+function makeFunctionOverridesSignature(overrides: Record<string, string>): string {
+    const entries = Object.entries(overrides ?? {}).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return JSON.stringify(entries);
+}
+
+// Rebuilds the keymap from the current command registry plus the user's
+// overrides, then re-registers the webview keys so that the main process
+// intercepts exactly the keys that are currently bound.
+function applyFunctionKeybindings(overrides?: Record<string, string>) {
+    const ov = overrides ?? getFunctionOverrides();
+    const { keyMap, chordMap } = buildEffectiveKeyMaps(ov);
+    globalKeyMap.clear();
+    for (const [key, handler] of keyMap) {
+        globalKeyMap.set(key, handler);
+    }
+    globalChordMap.clear();
+    for (const [prefix, subs] of chordMap) {
+        globalChordMap.set(prefix, subs);
+    }
     const allKeys = Array.from(globalKeyMap.keys());
     // special case keys, handled by web view
     allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
     getApi().registerGlobalWebviewKeys(allKeys);
+}
 
-    const splitBlockKeys = new Map<string, KeyHandler>();
-    splitBlockKeys.set("ArrowUp", () => {
-        handleSplitVertical("before");
-        return true;
+let functionKeybindingsUnsubFn: (() => void) | null = null;
+let lastFunctionOverridesSig = "";
+
+function registerGlobalKeys() {
+    // build (and cache) the registry before the first apply
+    getCommandDefs();
+    const overrides = getFunctionOverrides();
+    lastFunctionOverridesSig = makeFunctionOverridesSignature(overrides);
+    applyFunctionKeybindings(overrides);
+    // the user config can change at runtime (the settings page writes
+    // keybindings.json), so rebuild the keymap whenever the config changes
+    functionKeybindingsUnsubFn?.();
+    functionKeybindingsUnsubFn = globalStore.sub(atoms.fullConfigAtom, () => {
+        const nextOverrides = getFunctionOverrides();
+        const sig = makeFunctionOverridesSignature(nextOverrides);
+        if (sig === lastFunctionOverridesSig) {
+            return;
+        }
+        lastFunctionOverridesSig = sig;
+        applyFunctionKeybindings(nextOverrides);
     });
-    splitBlockKeys.set("ArrowDown", () => {
-        handleSplitVertical("after");
-        return true;
-    });
-    splitBlockKeys.set("ArrowLeft", () => {
-        handleSplitHorizontal("before");
-        return true;
-    });
-    splitBlockKeys.set("ArrowRight", () => {
-        handleSplitHorizontal("after");
-        return true;
-    });
-    globalChordMap.set("Ctrl:Shift:s", splitBlockKeys);
 }
 
 function registerBuilderGlobalKeys() {
@@ -822,8 +1243,11 @@ function getAllGlobalKeyBindings(): string[] {
 
 export {
     appHandleKeyDown,
+    CommandGroupLabels,
+    computeFunctionBindings,
     disableGlobalKeybindings,
     enableGlobalKeybindings,
+    getCommandDefs,
     getSimpleControlShiftAtom,
     globalRefocus,
     globalRefocusWithTimeout,
@@ -835,3 +1259,4 @@ export {
     unsetControlShift,
     uxCloseBlock,
 };
+export type { CommandDef, CommandGroup, FunctionBindings };
