@@ -144,7 +144,26 @@ function simpleCloseStaticTab() {
         });
 }
 
+// The settings view owns the "discard unsaved changes" question, so ask it
+// before we close it. Returns false when the user cancelled the discard.
+// Blocks that are not the settings view never prompt.
+function confirmDiscardConfigChanges(blockId: string): boolean {
+    const viewModel = getBlockComponentModel(blockId)?.viewModel;
+    if (viewModel?.viewType != "waveconfig") {
+        return true;
+    }
+    const confirmDiscardChanges = (viewModel as { confirmDiscardChanges?: () => boolean })?.confirmDiscardChanges;
+    if (typeof confirmDiscardChanges === "function" && !confirmDiscardChanges.call(viewModel)) {
+        return false;
+    }
+    return true;
+}
+
 function uxCloseBlock(blockId: string) {
+    if (!confirmDiscardConfigChanges(blockId)) {
+        // the user cancelled -- leave the block open
+        return;
+    }
     const workspaceLayoutModel = WorkspaceLayoutModel.getInstance();
     const isAIPanelOpen = workspaceLayoutModel.getAIPanelVisible();
     if (isAIPanelOpen && getStaticTabBlockCount() === 1) {
@@ -204,6 +223,14 @@ function genericClose() {
     const blockCount = getStaticTabBlockCount();
     if (blockCount === 0) {
         simpleCloseStaticTab();
+        return;
+    }
+
+    // The focused block may be the settings view with unsaved changes -- ask
+    // before closing it, same as the close button in its header.
+    const focusedLayoutModel = getLayoutModelForStaticTab();
+    const focusedBlockId = globalStore.get(focusedLayoutModel.focusedNode)?.data?.blockId;
+    if (focusedBlockId != null && !confirmDiscardConfigChanges(focusedBlockId)) {
         return;
     }
 
@@ -766,8 +793,7 @@ function closeFocusedConfigBlock(): boolean {
     if (viewModel?.viewType != "waveconfig") {
         return false;
     }
-    const confirmDiscardChanges = (viewModel as { confirmDiscardChanges?: () => boolean })?.confirmDiscardChanges;
-    if (typeof confirmDiscardChanges === "function" && !confirmDiscardChanges.call(viewModel)) {
+    if (!confirmDiscardConfigChanges(blockId)) {
         // the user cancelled -- swallow the key so nothing else reacts to it
         return true;
     }
