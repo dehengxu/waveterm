@@ -751,6 +751,38 @@ function deactivateSearch(): boolean {
     return false;
 }
 
+// Closes the settings view when it is the focused block. The settings view
+// owns the "discard unsaved changes" question, so we ask it before closing.
+// The visual tab of the settings view saves immediately, so it never has
+// pending changes and never prompts.
+function closeFocusedConfigBlock(): boolean {
+    const layoutModel = getLayoutModelForStaticTab();
+    const focusedNode = globalStore.get(layoutModel.focusedNode);
+    const blockId = focusedNode?.data?.blockId;
+    if (blockId == null) {
+        return false;
+    }
+    const viewModel = getBlockComponentModel(blockId)?.viewModel;
+    if (viewModel?.viewType != "waveconfig") {
+        return false;
+    }
+    const confirmDiscardChanges = (viewModel as { confirmDiscardChanges?: () => boolean })?.confirmDiscardChanges;
+    if (typeof confirmDiscardChanges === "function" && !confirmDiscardChanges.call(viewModel)) {
+        // the user cancelled -- swallow the key so nothing else reacts to it
+        return true;
+    }
+    if (getStaticTabBlockCount() <= 1) {
+        // the settings view is the only block in the tab, close the tab
+        simpleCloseStaticTab();
+    } else {
+        const node = layoutModel.getNodeByBlockId(blockId);
+        if (node) {
+            fireAndForget(() => layoutModel.closeNode(node.id));
+        }
+    }
+    return true;
+}
+
 function makeEscapeHandler(): KeyHandler {
     return () => {
         if (modalsModel.hasOpenModals()) {
@@ -760,7 +792,7 @@ function makeEscapeHandler(): KeyHandler {
         if (deactivateSearch()) {
             return true;
         }
-        return false;
+        return closeFocusedConfigBlock();
     };
 }
 

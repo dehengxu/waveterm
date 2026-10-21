@@ -453,7 +453,7 @@ export const KeybindingsVisualContent = memo(({ model }: KeybindingsVisualProps)
     const hasFunctionOverrides = Object.keys(functions).length > 0;
 
     return (
-        <div className="flex flex-col gap-5 p-4">
+        <div className="flex flex-col gap-5 p-4 h-full overflow-y-auto">
             <div className="flex flex-col gap-1">
                 <div className="text-sm font-semibold">全局唤起快捷键</div>
                 <div className="text-xs text-muted">
