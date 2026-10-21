@@ -16,11 +16,22 @@ import * as keyutil from "../frontend/util/keyutil";
 // On Windows, it will store to %LOCALAPPDATA%/waveterm/electron
 app.setName("waveterm/electron");
 
-const isDev = !app.isPackaged;
+// A packaged dev build (electron-vite build --mode development) is a real
+// installable app, but it must not share identity, config or data with the
+// production build -- otherwise macOS routes the two to the same instance
+// and the dev build silently overwrites the user's real config.
+const isPackagedDevBuild = app.isPackaged && process.env.WAVETERM_BUILD_FLAVOR === "dev";
+const isDev = !app.isPackaged || isPackagedDevBuild;
 const isDevVite = isDev && process.env.ELECTRON_RENDERER_URL;
 console.log(`Running in ${isDev ? "development" : "production"} mode`);
 if (isDev) {
     process.env[WaveDevVarName] = "1";
+    // in dev mode wavesrv refuses to start unless WCLOUD_ENDPOINT is an https
+    // endpoint (see checkEndpointVar in pkg/wcloud/wcloud.go). Give the
+    // packaged dev build a sane default so it just works when double-clicked.
+    if (!process.env.WCLOUD_ENDPOINT) {
+        process.env.WCLOUD_ENDPOINT = "https://api.waveterm.dev/central";
+    }
 }
 if (isDevVite) {
     process.env[WaveDevViteVarName] = "1";
@@ -32,7 +43,7 @@ const waveDirName = `${waveDirNamePrefix}${waveDirNameSuffix ? `-${waveDirNameSu
 
 const paths = envPaths("waveterm", { suffix: waveDirNameSuffix });
 
-app.setName(isDev ? "Wave (Dev)" : "Wave");
+app.setName(isPackagedDevBuild ? "Wave Dev" : isDev ? "Wave (Dev)" : "Wave");
 const unamePlatform = process.platform;
 const unameArch: string = process.arch;
 keyutil.setKeyUtilPlatform(unamePlatform);
@@ -158,7 +169,7 @@ function getElectronAppUnpackedBasePath(): string {
 }
 
 function getElectronAppResourcesPath(): string {
-    if (isDev) {
+    if (!app.isPackaged) {
         // import.meta.dirname in dev points to waveterm/dist/main
         return path.dirname(import.meta.dirname);
     }
