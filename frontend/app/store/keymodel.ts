@@ -483,6 +483,42 @@ function registerElectronReinjectKeyHandler() {
     });
 }
 
+// Opens the Wave settings view (the "waveconfig" block) in the current tab.
+async function openSettingsBlock() {
+    await createBlock({ meta: { view: "waveconfig" } }, false, true);
+}
+
+// Handles actions that originate in the main process, either from a
+// system-wide global hotkey or from the "Settings…" menu item.
+export function registerGlobalHotkeyActionHandler() {
+    getApi().onOpenSettings(() => {
+        fireAndForget(() => openSettingsBlock());
+    });
+    getApi().onGlobalHotkeyAction((actionId: string) => {
+        switch (actionId) {
+            case "ai.focus": {
+                FocusManager.getInstance().requestWaveAIFocus();
+                setTimeout(() => {
+                    FocusManager.getInstance().refocusNode();
+                }, 10);
+                return;
+            }
+            case "ai.toggle": {
+                const layoutModel = WorkspaceLayoutModel.getInstance();
+                layoutModel.setAIPanelVisible(!layoutModel.getAIPanelVisible());
+                return;
+            }
+            case "term.focus": {
+                globalRefocus();
+                return;
+            }
+            default:
+                console.log("unhandled global hotkey action", actionId);
+                return;
+        }
+    });
+}
+
 function tryReinjectKey(event: WaveKeyboardEvent): boolean {
     return appHandleKeyDown(event);
 }

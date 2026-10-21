@@ -137,6 +137,15 @@ function makeFileMenu(
             click: () => fireAndForget(callbacks.createNewWaveWindow),
         },
         {
+            label: "Settings…",
+            accelerator: "CommandOrControl+,",
+            click: (_, window) => {
+                const win = (window as WaveBrowserWindow) ?? focusedWaveWindow;
+                const wc = getWindowWebContents(win);
+                wc?.send("open-settings");
+            },
+        },
+        {
             role: "close",
             accelerator: "",
             click: () => {
@@ -321,7 +330,10 @@ function makeViewMenu(
                     const oref = `workspace:${workspaceId}`;
                     const meta = await RpcApi.GetMetaCommand(ElectronWshClient, { oref });
                     const current = meta?.["layout:widgetsvisible"] ?? true;
-                    await RpcApi.SetMetaCommand(ElectronWshClient, { oref, meta: { "layout:widgetsvisible": !current } });
+                    await RpcApi.SetMetaCommand(ElectronWshClient, {
+                        oref,
+                        meta: { "layout:widgetsvisible": !current },
+                    });
                 });
             },
         },

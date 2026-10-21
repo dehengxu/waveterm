@@ -5,7 +5,15 @@ import { ClientService, ObjectService, WindowService, WorkspaceService } from "@
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { fireAndForget } from "@/util/util";
-import { BaseWindow, BaseWindowConstructorOptions, dialog, globalShortcut, ipcMain, screen, webContents } from "electron";
+import {
+    BaseWindow,
+    BaseWindowConstructorOptions,
+    dialog,
+    globalShortcut,
+    ipcMain,
+    screen,
+    webContents,
+} from "electron";
 import { globalEvents } from "emain/emain-events";
 import path from "path";
 import { debounce } from "throttle-debounce";
@@ -1095,32 +1103,139 @@ async function quakeToggle() {
     }
 }
 
-let currentRawGlobalHotKey: string = null;
-let currentGlobalHotKey: string = null;
+// ── Global hotkeys ────────────────────────────────────────────────────
+// System-wide hotkeys are registered in the main process because
+// globalShortcut is an app-level Electron API. Each entry in the "global"
+// section of keybindings.json maps an action id to a key description
+// (e.g. "Cmd+Shift+Space").
+export const GlobalHotkeyActions: Record<string, string> = {
+    "window.toggle": "Show or hide the most recent Wave window",
+    "window.new": "Open a new Wave window",
+    "window.focus": "Focus the most recent Wave window",
+    "ai.focus": "Focus the WaveAI input",
+    "ai.toggle": "Toggle the WaveAI panel",
+    "term.focus": "Focus the terminal block",
+};
 
-export function registerGlobalHotkey(rawGlobalHotKey: string) {
-    if (rawGlobalHotKey === currentRawGlobalHotKey) {
+let registeredGlobalHotkeyAccels: string[] = [];
+let registeredGlobalHotkeyActions: Record<string, string> = {};
+let failedGlobalHotkeyActions: Record<string, string> = {};
+
+// Returns the registration status so the settings UI can surface failures
+// (e.g. an accelerator that is already claimed by the OS).
+export function getGlobalHotkeyStatus() {
+    return {
+        registered: { ...registeredGlobalHotkeyActions },
+        failed: { ...failedGlobalHotkeyActions },
+    };
+}
+
+export function registerGlobalHotkeys(rawHotkeys: Record<string, string>) {
+    for (const accel of registeredGlobalHotkeyAccels) {
+        try {
+            globalShortcut.unregister(accel);
+        } catch (e) {
+            // ignore, the accelerator may already be gone
+        }
+    }
+    registeredGlobalHotkeyAccels = [];
+    registeredGlobalHotkeyActions = {};
+    failedGlobalHotkeyActions = {};
+    if (!rawHotkeys) {
         return;
     }
-    if (currentGlobalHotKey != null) {
-        globalShortcut.unregister(currentGlobalHotKey);
-        currentGlobalHotKey = null;
-        currentRawGlobalHotKey = null;
+    for (const [actionId, rawKey] of Object.entries(rawHotkeys)) {
+        if (!rawKey) {
+            continue;
+        }
+        let electronHotKey: string;
+        try {
+            electronHotKey = waveKeyToElectronKey(rawKey);
+        } catch (e) {
+            console.log("invalid global hotkey", actionId, rawKey, e);
+            failedGlobalHotkeyActions[actionId] = rawKey;
+            continue;
+        }
+        try {
+            const ok = globalShortcut.register(electronHotKey, () => {
+                fireAndForget(() => runGlobalHotkeyAction(actionId));
+            });
+            if (!ok) {
+                // usually means the accelerator is already claimed by the OS
+                console.log("failed to register global hotkey", actionId, rawKey, "=>", electronHotKey);
+                failedGlobalHotkeyActions[actionId] = rawKey;
+                continue;
+            }
+            registeredGlobalHotkeyAccels.push(electronHotKey);
+            registeredGlobalHotkeyActions[actionId] = electronHotKey;
+        } catch (e) {
+            console.log("error registering global hotkey", actionId, rawKey, ":", e);
+            failedGlobalHotkeyActions[actionId] = rawKey;
+        }
     }
-    if (!rawGlobalHotKey) {
-        return;
-    }
+}
+
+async function runGlobalHotkeyAction(actionId: string) {
     try {
-        const electronHotKey = waveKeyToElectronKey(rawGlobalHotKey);
-        const ok = globalShortcut.register(electronHotKey, () => {
-            fireAndForget(quakeToggle);
-        });
-        currentRawGlobalHotKey = rawGlobalHotKey;
-        currentGlobalHotKey = electronHotKey;
-        console.log("registered globalhotkey", rawGlobalHotKey, "=>", electronHotKey, "ok=", ok);
+        switch (actionId) {
+            case "window.toggle":
+                await quakeToggle();
+                return;
+            case "window.new":
+                await createNewWaveWindow();
+                return;
+            case "window.focus":
+                showQuakeWindow();
+                return;
+            default:
+                // actions that need renderer cooperation (ai.focus, ai.toggle, ...)
+                showQuakeWindow();
+                dispatchGlobalHotkeyAction(actionId);
+                return;
+        }
     } catch (e) {
-        console.log("error registering global hotkey", rawGlobalHotKey, ":", e);
+        console.log("error running global hotkey action", actionId, e);
     }
+}
+
+// Brings the most recent Wave window to the front without hiding it.
+function showQuakeWindow() {
+    let window = quakeWindow;
+    if (window?.isDestroyed()) {
+        quakeWindow = null;
+        window = null;
+    }
+    if (window == null) {
+        fireAndForget(() => createNewWaveWindow());
+        return;
+    }
+    if (window.isFullScreen()) {
+        // macos has a really long fullscreen animation and can have issues restoring from fullscreen, so we skip on macos
+        quakeRestoreFullscreenOnShow = process.platform !== "darwin";
+        window.setFullScreen(false);
+    }
+    if (!window.isVisible()) {
+        const targetDisplay = getDisplayForQuakeToggle();
+        moveWindowToDisplay(window, targetDisplay);
+        window.show();
+    }
+    window.focus();
+    if (window.activeTabView?.webContents) {
+        window.activeTabView.webContents.focus();
+    }
+}
+
+// Forwards a global hotkey action to the renderer of the target window.
+function dispatchGlobalHotkeyAction(actionId: string) {
+    const window = quakeWindow;
+    if (window == null || window.isDestroyed()) {
+        return;
+    }
+    const tabView = window.activeTabView;
+    if (tabView?.webContents == null) {
+        return;
+    }
+    tabView.webContents.send("global-hotkey-action", actionId);
 }
 
 export function initGlobalHotkeyEventSubscription() {
@@ -1128,8 +1243,14 @@ export function initGlobalHotkeyEventSubscription() {
         eventType: "config",
         handler: (event) => {
             try {
-                const hotkey = event?.data?.fullconfig?.settings?.["app:globalhotkey"];
-                registerGlobalHotkey(hotkey ?? null);
+                const fullconfig = event?.data?.fullconfig;
+                const globalHotkeys = { ...(fullconfig?.keybindings?.global ?? {}) };
+                // the legacy single hotkey setting still works as a fallback for "window.toggle"
+                const legacyHotkey = fullconfig?.settings?.["app:globalhotkey"];
+                if (!globalHotkeys["window.toggle"] && legacyHotkey) {
+                    globalHotkeys["window.toggle"] = legacyHotkey;
+                }
+                registerGlobalHotkeys(globalHotkeys);
             } catch (e) {
                 console.log("error handling config event for globalhotkey", e);
             }

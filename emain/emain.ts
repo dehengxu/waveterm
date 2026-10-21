@@ -50,12 +50,12 @@ import {
     getWaveWindowById,
     getWaveWindowByWorkspaceId,
     initGlobalHotkeyEventSubscription,
-    registerGlobalHotkey,
+    registerGlobalHotkeys,
     relaunchBrowserWindows,
     WaveBrowserWindow,
 } from "./emain-window";
 import { ElectronWshClient, initElectronWshClient } from "./emain-wsh";
-import { getLaunchSettings } from "./launchsettings";
+import { getLaunchKeybindings, getLaunchSettings } from "./launchsettings";
 import { configureAutoUpdater, updater } from "./updater";
 
 const electronApp = electron.app;
@@ -453,10 +453,13 @@ async function appMain() {
             }
         });
     });
-    const rawGlobalHotKey = launchSettings?.["app:globalhotkey"];
-    if (rawGlobalHotKey) {
-        registerGlobalHotkey(rawGlobalHotKey);
+    const startupGlobalHotkeys = { ...(getLaunchKeybindings()?.global ?? {}) };
+    // the legacy single hotkey setting still works as a fallback for "window.toggle"
+    const legacyGlobalHotKey = launchSettings?.["app:globalhotkey"];
+    if (!startupGlobalHotkeys["window.toggle"] && legacyGlobalHotKey) {
+        startupGlobalHotkeys["window.toggle"] = legacyGlobalHotKey;
     }
+    registerGlobalHotkeys(startupGlobalHotkeys);
     initGlobalHotkeyEventSubscription();
 }
 

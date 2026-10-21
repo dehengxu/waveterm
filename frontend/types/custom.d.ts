@@ -108,6 +108,9 @@ declare global {
         onMenuItemAbout: (callback: () => void) => void; // menu-item-about
         updateWindowControlsOverlay: (rect: Dimensions) => void; // update-window-controls-overlay
         onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void; // reinject-key
+        onGlobalHotkeyAction: (callback: (actionId: string) => void) => void; // global-hotkey-action
+        onOpenSettings: (callback: () => void) => void; // open-settings
+        getGlobalHotkeyStatus: () => Promise<{ registered: Record<string, string>; failed: Record<string, string> }>; // get-global-hotkey-status
         setWebviewFocus: (focusedId: number) => void; // webview-focus, focusedId is the getWebContentsId of the webview
         registerGlobalWebviewKeys: (keys: string[]) => void; // register-global-webview-keys
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void; // control-shift-state-update
