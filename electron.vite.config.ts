@@ -97,6 +97,9 @@ export default defineConfig({
         define: {
             "process.env.WS_NO_BUFFER_UTIL": "true",
             "process.env.WS_NO_UTF_8_VALIDATE": "true",
+            // "dev" for a packaged dev build, "release" otherwise. The build
+            // script sets WAVETERM_BUILD_FLAVOR=dev when packaging make-dev.
+            "process.env.WAVETERM_BUILD_FLAVOR": JSON.stringify(process.env.WAVETERM_BUILD_FLAVOR ?? "release"),
         },
     },
     preload: {

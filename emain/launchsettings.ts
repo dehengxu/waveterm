@@ -19,3 +19,19 @@ export function getLaunchSettings(): SettingsType {
         // fail silently
     }
 }
+
+/**
+ * Get keybindings directly from the Wave Home directory on launch.
+ * Only use this when the app is first starting up, so that global hotkeys are
+ * registered before the first config event arrives.
+ * @returns The initial key bindings for the application.
+ */
+export function getLaunchKeybindings(): { global?: Record<string, string>; functions?: Record<string, string> } {
+    const keybindingsPath = path.join(getWaveConfigDir(), "keybindings.json");
+    try {
+        const keybindingsContents = fs.readFileSync(keybindingsPath, "utf8");
+        return JSON.parse(keybindingsContents);
+    } catch (_) {
+        // fail silently
+    }
+}

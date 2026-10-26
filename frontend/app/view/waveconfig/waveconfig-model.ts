@@ -6,6 +6,7 @@ import { globalStore } from "@/app/store/jotaiStore";
 import type { TabModel } from "@/app/store/tab-model";
 import { makeORef } from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { KeybindingsVisualContent } from "@/app/view/waveconfig/keybindingsvisual";
 import { SecretsContent } from "@/app/view/waveconfig/secretscontent";
 import { WaveConfigView } from "@/app/view/waveconfig/waveconfig";
 import type { WaveConfigEnv } from "@/app/view/waveconfig/waveconfigenv";
@@ -63,6 +64,15 @@ function makeConfigFiles(isWindows: boolean): ConfigFile[] {
             language: "json",
             docsUrl: "https://docs.waveterm.dev/config",
             hasJsonView: true,
+        },
+        {
+            name: "Keybindings",
+            path: "keybindings.json",
+            language: "json",
+            description: "Global hotkeys",
+            docsUrl: "https://docs.waveterm.dev/keybindings",
+            hasJsonView: true,
+            visualComponent: KeybindingsVisualContent,
         },
         {
             name: "Connections",

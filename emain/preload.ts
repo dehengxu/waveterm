@@ -43,6 +43,10 @@ contextBridge.exposeInMainWorld("api", {
     onMenuItemAbout: (callback) => ipcRenderer.on("menu-item-about", callback),
     updateWindowControlsOverlay: (rect) => ipcRenderer.send("update-window-controls-overlay", rect),
     onReinjectKey: (callback) => ipcRenderer.on("reinject-key", (_event, waveEvent) => callback(waveEvent)),
+    onGlobalHotkeyAction: (callback) =>
+        ipcRenderer.on("global-hotkey-action", (_event, actionId: string) => callback(actionId)),
+    onOpenSettings: (callback) => ipcRenderer.on("open-settings", () => callback()),
+    getGlobalHotkeyStatus: () => ipcRenderer.invoke("get-global-hotkey-status"),
     setWebviewFocus: (focused: number) => ipcRenderer.send("webview-focus", focused),
     registerGlobalWebviewKeys: (keys) => ipcRenderer.send("register-global-webview-keys", keys),
     onControlShiftStateUpdate: (callback) =>

@@ -369,6 +369,16 @@ type TermThemeType struct {
 	Cursor              string  `json:"cursor"`
 }
 
+// KeybindingsConfigType holds user-configurable key bindings.
+//   - Global maps an action id (e.g. "window.toggle") to a key description
+//     (e.g. "Cmd+Shift+Space") that triggers the action system-wide.
+//   - Functions maps a command id (e.g. "wave.tab.new") to a key description
+//     that triggers the command while Wave is focused. An empty value disables it.
+type KeybindingsConfigType struct {
+	Global    map[string]string `json:"global,omitempty"`
+	Functions map[string]string `json:"functions,omitempty"`
+}
+
 type FullConfigType struct {
 	Settings       SettingsType                    `json:"settings" merge:"meta"`
 	MimeTypes      map[string]MimeTypeConfigType   `json:"mimetypes"`
@@ -380,6 +390,7 @@ type FullConfigType struct {
 	Connections    map[string]ConnKeywords         `json:"connections"`
 	Bookmarks      map[string]WebBookmark          `json:"bookmarks"`
 	WaveAIModes    map[string]AIModeConfigType     `json:"waveai"`
+	Keybindings    KeybindingsConfigType           `json:"keybindings"`
 	ConfigErrors   []ConfigError                   `json:"configerrors" configfile:"-"`
 	Version        string                          `json:"version" configfile:"-"`
 	BuildTime      string                          `json:"buildtime" configfile:"-"`

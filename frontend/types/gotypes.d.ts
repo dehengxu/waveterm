@@ -1019,6 +1019,7 @@ declare global {
         connections: {[key: string]: ConnKeywords};
         bookmarks: {[key: string]: WebBookmark};
         waveai: {[key: string]: AIModeConfigType};
+        keybindings: KeybindingsConfigType;
         configerrors: ConfigError[];
         version: string;
         buildtime: string;
@@ -1055,6 +1056,12 @@ declare global {
     type JobManagerStatusUpdate = {
         jobid: string;
         jobmanagerstatus: string;
+    };
+
+    // wconfig.KeybindingsConfigType
+    type KeybindingsConfigType = {
+        global?: {[key: string]: string};
+        functions?: {[key: string]: string};
     };
 
     // waveobj.LayoutActionData

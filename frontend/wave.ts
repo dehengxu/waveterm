@@ -10,6 +10,7 @@ import {
     registerBuilderGlobalKeys,
     registerControlShiftStateUpdateHandler,
     registerElectronReinjectKeyHandler,
+    registerGlobalHotkeyActionHandler,
     registerGlobalKeys,
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -190,6 +191,7 @@ async function initWave(initOpts: WaveInitOpts) {
     registerGlobalKeys();
     registerElectronReinjectKeyHandler();
     registerControlShiftStateUpdateHandler();
+    registerGlobalHotkeyActionHandler();
     await loadMonaco();
     const fullConfig = await RpcApi.GetFullConfigCommand(TabRpcClient);
     console.log("fullconfig", fullConfig);

@@ -24,7 +24,7 @@ import { callWithOriginalXdgCurrentDesktopAsync, unamePlatform } from "./emain-p
 import { getWaveTabViewByWebContentsId } from "./emain-tabview";
 import { handleCtrlShiftState } from "./emain-util";
 import { getWaveVersion } from "./emain-wavesrv";
-import { createNewWaveWindow, getWaveWindowByWebContentsId } from "./emain-window";
+import { createNewWaveWindow, getGlobalHotkeyStatus, getWaveWindowByWebContentsId } from "./emain-window";
 import { ElectronWshClient } from "./emain-wsh";
 
 const electronApp = electron.app;
@@ -330,6 +330,10 @@ export function initIpcHandlers() {
 
     electron.ipcMain.on("register-global-webview-keys", (event, keys: string[]) => {
         webviewKeys = keys ?? [];
+    });
+
+    electron.ipcMain.handle("get-global-hotkey-status", () => {
+        return getGlobalHotkeyStatus();
     });
 
     electron.ipcMain.on("set-keyboard-chord-mode", (event) => {
