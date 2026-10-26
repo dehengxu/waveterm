@@ -20,6 +20,10 @@ export interface AIPanelInputRef {
     focus: () => void;
     resize: () => void;
     scrollToBottom: () => void;
+    // Removes the whole line the caret is on. Returns false when the input
+    // does not hold the DOM focus, so the caller can fall through to
+    // another target (e.g. a terminal block).
+    deleteLine: () => boolean;
 }
 
 export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps) => {
@@ -66,6 +70,62 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
         textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
     }, []);
 
+    // React re-renders the controlled textarea and the browser puts the
+    // caret at the end of the new text, so the position we want has to be
+    // restored once the value has been committed.
+    const pendingCaretRef = useRef<number | null>(null);
+
+    const deleteLine = useCallback((): boolean => {
+        const textarea = textareaRef.current;
+        if (!textarea) {
+            return false;
+        }
+        if (document.activeElement !== textarea) {
+            // the input does not have the focus -- let someone else handle it
+            return false;
+        }
+        const value = textarea.value;
+        const caret = textarea.selectionStart ?? 0;
+        // start of the line the caret is on
+        const lineStart = value.lastIndexOf("\n", caret - 1) + 1;
+        const nextBreak = value.indexOf("\n", caret);
+        const contentEnd = nextBreak == -1 ? value.length : nextBreak;
+        let removeStart: number;
+        let removeEnd: number;
+        if (contentEnd < value.length) {
+            // the line has a terminator, take it along with the line
+            removeStart = lineStart;
+            removeEnd = contentEnd + 1;
+        } else if (lineStart > 0) {
+            // last line without a terminator, take the preceding newline
+            removeStart = lineStart - 1;
+            removeEnd = value.length;
+        } else {
+            removeStart = 0;
+            removeEnd = value.length;
+        }
+        const newValue = value.slice(0, removeStart) + value.slice(removeEnd);
+        if (newValue !== value) {
+            pendingCaretRef.current = removeStart;
+            setInput(newValue);
+        }
+        return true;
+    }, [setInput]);
+
+    useEffect(() => {
+        const pendingCaret = pendingCaretRef.current;
+        if (pendingCaret == null) {
+            return;
+        }
+        pendingCaretRef.current = null;
+        const textarea = textareaRef.current;
+        if (!textarea) {
+            return;
+        }
+        textarea.selectionStart = pendingCaret;
+        textarea.selectionEnd = pendingCaret;
+    }, [input]);
+
     useEffect(() => {
         const inputRefObject: React.RefObject<AIPanelInputRef> = {
             current: {
@@ -79,10 +139,11 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
                         textarea.scrollTop = textarea.scrollHeight;
                     }
                 },
+                deleteLine: deleteLine,
             },
         };
         model.registerInputRef(inputRefObject);
-    }, [model, resizeTextarea]);
+    }, [model, resizeTextarea, deleteLine]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         const isComposing = e.nativeEvent?.isComposing || e.keyCode == 229;

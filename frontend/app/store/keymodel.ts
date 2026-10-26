@@ -21,6 +21,7 @@ import {
     WOS,
 } from "@/app/store/global";
 import { getActiveTabModel } from "@/app/store/tab-model";
+import type { TermViewModel } from "@/app/view/term/term-model";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
@@ -737,6 +738,38 @@ function makeToggleAiPanelHandler(): KeyHandler {
     };
 }
 
+// Deletes the whole line the caret is on. The AI panel input owns its
+// text (it goes through the model atom), a terminal block gets the
+// readline "kill line" sequence instead.
+function makeDeleteLineHandler(): KeyHandler {
+    return () => {
+        if (WaveAIModel.getInstance().deleteInputLine()) {
+            return true;
+        }
+        const blockId = getFocusedBlockInStaticTab();
+        if (blockId == null) {
+            return false;
+        }
+        const bcm = getBlockComponentModel(blockId);
+        const viewModel = bcm?.viewModel;
+        if (viewModel?.viewType != "term") {
+            return false;
+        }
+        const termModel = viewModel as TermViewModel;
+        const termElem = termModel.termRef?.current?.connectElem;
+        const activeElem = document.activeElement;
+        if (termElem == null || activeElem == null || !termElem.contains(activeElem)) {
+            // the terminal does not hold the focus (the user may be typing
+            // in a block's search field) -- leave the key alone
+            return false;
+        }
+        // Ctrl+U kills back to the start of the line, Ctrl+K kills forward
+        // to the end of it -- together they remove the whole line.
+        termModel.sendDataToController("\x15\x0b");
+        return true;
+    };
+}
+
 function makeSplitBlockHandler(axis: "horizontal" | "vertical", position: "before" | "after"): KeyHandler {
     return () => {
         if (axis === "vertical") {
@@ -1074,6 +1107,13 @@ function getCommandDefs(): CommandDef[] {
             handler: makeToggleTermMultiInputHandler(),
         },
         // ── misc ──
+        {
+            id: "wave.edit.delete.line",
+            group: "misc",
+            label: "删除当前整行",
+            defaultKeys: ["Cmd:Backspace"],
+            handler: makeDeleteLineHandler(),
+        },
         {
             id: "wave.close",
             group: "misc",

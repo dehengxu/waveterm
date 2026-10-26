@@ -367,6 +367,13 @@ export class WaveAIModel {
         }
     }
 
+    // Removes the whole line the caret is on in the chat input. Returns
+    // false when the input does not have the DOM focus, so the caller can
+    // fall through to another target.
+    deleteInputLine(): boolean {
+        return this.inputRef?.current?.deleteLine() ?? false;
+    }
+
     async reloadChatFromBackend(chatIdValue: string): Promise<WaveUIMessage[]> {
         const chatData = await RpcApi.GetWaveAIChatCommand(TabRpcClient, { chatid: chatIdValue });
         const messages: UIMessage[] = chatData?.messages ?? [];
