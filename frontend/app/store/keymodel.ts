@@ -773,6 +773,32 @@ function makeDeleteLineHandler(): KeyHandler {
     };
 }
 
+// Returns the terminal model of the focused block when that terminal holds
+// the DOM focus, otherwise null -- the key then belongs to somebody else
+// (the AI chat input, a search field, a webview page, ...).
+function getFocusedTermModel(): TermViewModel | null {
+    const blockId = getFocusedBlockInStaticTab();
+    if (blockId == null) {
+        return null;
+    }
+    const bcm = getBlockComponentModel(blockId);
+    const viewModel = bcm?.viewModel;
+    if (viewModel?.viewType != "term") {
+        return null;
+    }
+    const termModel = viewModel as TermViewModel;
+    if (globalStore.get(termModel.termMode) == "vdom") {
+        // the block is running a vdom app, not a shell
+        return null;
+    }
+    const termElem = termModel.termRef?.current?.connectElem;
+    const activeElem = document.activeElement;
+    if (termElem == null || activeElem == null || !termElem.contains(activeElem)) {
+        return null;
+    }
+    return termModel;
+}
+
 // Moves the caret one word left/right inside the focused terminal block.
 //
 // ESC b / ESC f are the readline/zle "backward-word" / "forward-word"
@@ -786,25 +812,8 @@ function makeDeleteLineHandler(): KeyHandler {
 // the exact definition of "word" follows the shell in use.
 function makeTermWordMotionHandler(direction: "left" | "right"): KeyHandler {
     return () => {
-        const blockId = getFocusedBlockInStaticTab();
-        if (blockId == null) {
-            return false;
-        }
-        const bcm = getBlockComponentModel(blockId);
-        const viewModel = bcm?.viewModel;
-        if (viewModel?.viewType != "term") {
-            return false;
-        }
-        const termModel = viewModel as TermViewModel;
-        if (globalStore.get(termModel.termMode) == "vdom") {
-            // the block is running a vdom app, not a shell
-            return false;
-        }
-        const termElem = termModel.termRef?.current?.connectElem;
-        const activeElem = document.activeElement;
-        if (termElem == null || activeElem == null || !termElem.contains(activeElem)) {
-            // the terminal does not hold the focus (the user may be typing
-            // in the AI chat input) -- leave the key alone
+        const termModel = getFocusedTermModel();
+        if (termModel == null) {
             return false;
         }
         termModel.sendDataToController(direction == "left" ? "\x1bb" : "\x1bf");
@@ -812,14 +821,43 @@ function makeTermWordMotionHandler(direction: "left" | "right"): KeyHandler {
     };
 }
 
-// Option+Left / Option+Right are only bound on macOS. On Linux and Windows
-// the Option key is the Meta/Super key, and the terminal emulators there
-// already send the meta+arrow sequences the shell understands.
-function getTermWordMotionDefaultKeys(direction: "left" | "right"): string[] {
+// Sends a plain cursor-up / cursor-down, which the shell maps to the
+// previous/next history entry. xterm.js would encode Option+ArrowUp as
+// "CSI 1;3A", which no shell binds -- it would bell and type a literal
+// ";3A" into the command line.
+//
+// The byte sequence follows the terminal's cursor key mode: with the
+// application cursor keys mode on (vim, less, ...) a plain arrow is sent as
+// "ESC O A", otherwise as "ESC [ A".
+function makeTermHistoryHandler(direction: "up" | "down"): KeyHandler {
+    return () => {
+        const termModel = getFocusedTermModel();
+        if (termModel == null) {
+            return false;
+        }
+        const term = termModel.termRef?.current?.terminal;
+        const appCursorKeys = term?.modes?.applicationCursorKeysMode ?? false;
+        const data =
+            direction == "up"
+                ? appCursorKeys
+                    ? "\x1bOA"
+                    : "\x1b[A"
+                : appCursorKeys
+                  ? "\x1bOB"
+                  : "\x1b[B";
+        termModel.sendDataToController(data);
+        return true;
+    };
+}
+
+// Option+<arrow> is only bound on macOS. On Linux and Windows the Option key
+// is the Meta/Super key, and the terminal emulators there already send the
+// meta+arrow sequences the shell understands.
+function getTermOptionArrowDefaultKeys(key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"): string[] {
     if (!isMacOS()) {
         return [];
     }
-    return [direction == "left" ? "Option:ArrowLeft" : "Option:ArrowRight"];
+    return [`Option:${key}`];
 }
 
 function makeSplitBlockHandler(axis: "horizontal" | "vertical", position: "before" | "after"): KeyHandler {
@@ -1162,7 +1200,7 @@ function getCommandDefs(): CommandDef[] {
             id: "wave.term.word.left",
             group: "terminal",
             label: "终端：向左移动一个词",
-            defaultKeys: getTermWordMotionDefaultKeys("left"),
+            defaultKeys: getTermOptionArrowDefaultKeys("ArrowLeft"),
             handler: makeTermWordMotionHandler("left"),
             // a webview block belongs to the page, let it keep the key
             noWebviewIntercept: true,
@@ -1171,8 +1209,26 @@ function getCommandDefs(): CommandDef[] {
             id: "wave.term.word.right",
             group: "terminal",
             label: "终端：向右移动一个词",
-            defaultKeys: getTermWordMotionDefaultKeys("right"),
+            defaultKeys: getTermOptionArrowDefaultKeys("ArrowRight"),
             handler: makeTermWordMotionHandler("right"),
+            // a webview block belongs to the page, let it keep the key
+            noWebviewIntercept: true,
+        },
+        {
+            id: "wave.term.history.up",
+            group: "terminal",
+            label: "终端：上一条历史（等同 ↑）",
+            defaultKeys: getTermOptionArrowDefaultKeys("ArrowUp"),
+            handler: makeTermHistoryHandler("up"),
+            // a webview block belongs to the page, let it keep the key
+            noWebviewIntercept: true,
+        },
+        {
+            id: "wave.term.history.down",
+            group: "terminal",
+            label: "终端：下一条历史（等同 ↓）",
+            defaultKeys: getTermOptionArrowDefaultKeys("ArrowDown"),
+            handler: makeTermHistoryHandler("down"),
             // a webview block belongs to the page, let it keep the key
             noWebviewIntercept: true,
         },
