@@ -53,6 +53,16 @@ describe("keyutil option bindings", () => {
         expect(keyutil.checkKeyPressed(ev, "Option:ArrowLeft")).toBe(false);
     });
 
+    it("matches the history commands against Option+Up / Option+Down", () => {
+        const up = macEvent("ArrowUp", { alt: true });
+        expect(keyutil.checkKeyPressed(up, "Option:ArrowUp")).toBe(true);
+        expect(keyutil.checkKeyPressed(up, "Option:ArrowDown")).toBe(false);
+
+        const down = macEvent("ArrowDown", { alt: true });
+        expect(keyutil.checkKeyPressed(down, "Option:ArrowDown")).toBe(true);
+        expect(keyutil.checkKeyPressed(down, "Option:ArrowUp")).toBe(false);
+    });
+
     it("does not match a bare arrow key", () => {
         const ev = macEvent("ArrowLeft");
         expect(keyutil.checkKeyPressed(ev, "Option:ArrowLeft")).toBe(false);
