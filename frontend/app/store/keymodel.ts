@@ -25,7 +25,7 @@ import type { TermViewModel } from "@/app/view/term/term-model";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { deleteLayoutModelForTab, getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
-import { isWindows } from "@/util/platformutil";
+import { isMacOS, isWindows } from "@/util/platformutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { fireAndForget } from "@/util/util";
 import * as jotai from "jotai";
@@ -604,6 +604,9 @@ type CommandDef = {
     chordId?: string;
     // fixed commands are dispatched by the app menu and cannot be rebound
     fixed?: boolean;
+    // commands that only make sense inside the app window are not
+    // intercepted in webview blocks -- there the key belongs to the page
+    noWebviewIntercept?: boolean;
 };
 
 type FunctionBindings = {
@@ -768,6 +771,55 @@ function makeDeleteLineHandler(): KeyHandler {
         termModel.sendDataToController("\x15\x0b");
         return true;
     };
+}
+
+// Moves the caret one word left/right inside the focused terminal block.
+//
+// ESC b / ESC f are the readline/zle "backward-word" / "forward-word"
+// sequences -- the same bytes Terminal.app and iTerm2 send for
+// Option+Left / Option+Right. xterm.js would otherwise encode the key as
+// "CSI 1;3D", which neither bash nor zsh binds, so the shell would bell and
+// drop a literal ";3D" into the command line.
+//
+// The word boundaries are the shell's own (readline uses letters and digits,
+// zsh uses WORDCHARS, which by default also holds "-_./=" and friends), so
+// the exact definition of "word" follows the shell in use.
+function makeTermWordMotionHandler(direction: "left" | "right"): KeyHandler {
+    return () => {
+        const blockId = getFocusedBlockInStaticTab();
+        if (blockId == null) {
+            return false;
+        }
+        const bcm = getBlockComponentModel(blockId);
+        const viewModel = bcm?.viewModel;
+        if (viewModel?.viewType != "term") {
+            return false;
+        }
+        const termModel = viewModel as TermViewModel;
+        if (globalStore.get(termModel.termMode) == "vdom") {
+            // the block is running a vdom app, not a shell
+            return false;
+        }
+        const termElem = termModel.termRef?.current?.connectElem;
+        const activeElem = document.activeElement;
+        if (termElem == null || activeElem == null || !termElem.contains(activeElem)) {
+            // the terminal does not hold the focus (the user may be typing
+            // in the AI chat input) -- leave the key alone
+            return false;
+        }
+        termModel.sendDataToController(direction == "left" ? "\x1bb" : "\x1bf");
+        return true;
+    };
+}
+
+// Option+Left / Option+Right are only bound on macOS. On Linux and Windows
+// the Option key is the Meta/Super key, and the terminal emulators there
+// already send the meta+arrow sequences the shell understands.
+function getTermWordMotionDefaultKeys(direction: "left" | "right"): string[] {
+    if (!isMacOS()) {
+        return [];
+    }
+    return [direction == "left" ? "Option:ArrowLeft" : "Option:ArrowRight"];
 }
 
 function makeSplitBlockHandler(axis: "horizontal" | "vertical", position: "before" | "after"): KeyHandler {
@@ -1106,6 +1158,24 @@ function getCommandDefs(): CommandDef[] {
             defaultKeys: ["Ctrl:Shift:i"],
             handler: makeToggleTermMultiInputHandler(),
         },
+        {
+            id: "wave.term.word.left",
+            group: "terminal",
+            label: "终端：向左移动一个词",
+            defaultKeys: getTermWordMotionDefaultKeys("left"),
+            handler: makeTermWordMotionHandler("left"),
+            // a webview block belongs to the page, let it keep the key
+            noWebviewIntercept: true,
+        },
+        {
+            id: "wave.term.word.right",
+            group: "terminal",
+            label: "终端：向右移动一个词",
+            defaultKeys: getTermWordMotionDefaultKeys("right"),
+            handler: makeTermWordMotionHandler("right"),
+            // a webview block belongs to the page, let it keep the key
+            noWebviewIntercept: true,
+        },
         // ── misc ──
         {
             id: "wave.edit.delete.line",
@@ -1236,6 +1306,7 @@ function computeFunctionBindings(overrides: Record<string, string>): FunctionBin
 function buildEffectiveKeyMaps(overrides: Record<string, string>): {
     keyMap: Map<string, KeyHandler>;
     chordMap: Map<string, Map<string, KeyHandler>>;
+    webviewExcludedKeys: Set<string>;
 } {
     const defs = getCommandDefs();
     const defById = new Map<string, CommandDef>();
@@ -1244,10 +1315,14 @@ function buildEffectiveKeyMaps(overrides: Record<string, string>): {
     }
     const bindings = computeFunctionBindings(overrides);
     const keyMap = new Map<string, KeyHandler>();
+    const webviewExcludedKeys = new Set<string>();
     for (const [key, commandId] of bindings.keyOwners) {
         const def = defById.get(commandId);
         if (def == null || def.fixed || def.chordPrefix) {
             continue;
+        }
+        if (def.noWebviewIntercept) {
+            webviewExcludedKeys.add(key);
         }
         if (def.handler) {
             keyMap.set(key, def.handler);
@@ -1269,7 +1344,7 @@ function buildEffectiveKeyMaps(overrides: Record<string, string>): {
             chordMap.set(prefix, subs);
         }
     }
-    return { keyMap, chordMap };
+    return { keyMap, chordMap, webviewExcludedKeys };
 }
 
 function getFunctionOverrides(): Record<string, string> {
@@ -1287,7 +1362,7 @@ function makeFunctionOverridesSignature(overrides: Record<string, string>): stri
 // intercepts exactly the keys that are currently bound.
 function applyFunctionKeybindings(overrides?: Record<string, string>) {
     const ov = overrides ?? getFunctionOverrides();
-    const { keyMap, chordMap } = buildEffectiveKeyMaps(ov);
+    const { keyMap, chordMap, webviewExcludedKeys } = buildEffectiveKeyMaps(ov);
     globalKeyMap.clear();
     for (const [key, handler] of keyMap) {
         globalKeyMap.set(key, handler);
@@ -1296,7 +1371,7 @@ function applyFunctionKeybindings(overrides?: Record<string, string>) {
     for (const [prefix, subs] of chordMap) {
         globalChordMap.set(prefix, subs);
     }
-    const allKeys = Array.from(globalKeyMap.keys());
+    const allKeys = Array.from(globalKeyMap.keys()).filter((key) => !webviewExcludedKeys.has(key));
     // special case keys, handled by web view
     allKeys.push("Cmd:l", "Cmd:r", "Cmd:ArrowRight", "Cmd:ArrowLeft", "Cmd:o");
     getApi().registerGlobalWebviewKeys(allKeys);
