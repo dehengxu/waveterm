@@ -5,6 +5,7 @@ package aiusechat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
@@ -33,9 +34,13 @@ func termExecChatOpts(autoApprove bool) uctypes.WaveChatOpts {
 	return opts
 }
 
+func termExecInput(command string) any {
+	return map[string]any{"widget_id": "abcdefgh", "command": command}
+}
+
 func approvalFor(t *testing.T, command string, opts uctypes.WaveChatOpts) string {
 	t.Helper()
-	args, err := json.Marshal(map[string]any{"widget_id": "abcdefgh", "command": command})
+	args, err := json.Marshal(termExecInput(command))
 	if err != nil {
 		t.Fatalf("failed to marshal the tool arguments: %v", err)
 	}
@@ -43,9 +48,34 @@ func approvalFor(t *testing.T, command string, opts uctypes.WaveChatOpts) string
 	return toolUse.Approval
 }
 
-// TestTermExecuteCommandDenyBlocksAutoApprove covers acceptance criterion 1:
-// a denied command must not be auto-approved, even when the user permanently
-// approved the tool.
+// termExecSpy stands in for the terminal runner. It records every command that
+// made it to the terminal, so a test can prove that a blocked command never
+// got there.
+type termExecSpy struct {
+	commands []string
+}
+
+func (s *termExecSpy) run(_ string, input any) (*TermExecuteCommandToolOutput, error) {
+	command := cmdpolicy.CommandFromToolInput(input)
+	s.commands = append(s.commands, command)
+	return &TermExecuteCommandToolOutput{
+		WidgetId:  "abcdefgh",
+		Command:   command,
+		Submitted: true,
+	}, nil
+}
+
+func setTestRunner(t *testing.T, spy *termExecSpy) {
+	t.Helper()
+	prev := termExecuteRunner
+	termExecuteRunner = spy.run
+	t.Cleanup(func() { termExecuteRunner = prev })
+}
+
+// TestTermExecuteCommandDenyBlocksAutoApprove covers acceptance criterion 2:
+// a denied command is not sent to the approval prompt at all. It answers
+// "user denied", so the flow skips the approval wait instead of asking the
+// user to confirm a command that is never going to run.
 func TestTermExecuteCommandDenyBlocksAutoApprove(t *testing.T) {
 	setTestPolicy(t, wconfig.CommandPolicyConfigType{
 		Deny:  []string{"rm -rf", "sudo"},
@@ -63,14 +93,87 @@ func TestTermExecuteCommandDenyBlocksAutoApprove(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			approval := approvalFor(t, tc.command, opts)
-			if approval != uctypes.ApprovalNeedsApproval {
-				t.Fatalf("approval = %q, want %q", approval, uctypes.ApprovalNeedsApproval)
+			if approval != uctypes.ApprovalUserDenied {
+				t.Fatalf("approval = %q, want %q", approval, uctypes.ApprovalUserDenied)
 			}
 		})
 	}
 }
 
-// TestTermExecuteCommandAllowSkipsApproval covers acceptance criterion 2:
+// TestTermExecuteCommandDenyNeverReachesTerminal covers acceptance criterion
+// 1: a denied command is blocked in the execution path, so it is never typed
+// into the terminal. The spy stands in for the terminal runner and must not
+// be called.
+func TestTermExecuteCommandDenyNeverReachesTerminal(t *testing.T) {
+	setTestPolicy(t, wconfig.CommandPolicyConfigType{
+		Deny:  []string{"rm -rf", "sudo"},
+		Allow: []string{"git status"},
+	})
+	spy := &termExecSpy{}
+	setTestRunner(t, spy)
+
+	toolDef := GetTermExecuteCommandToolDefinition("tab1")
+	_, err := toolDef.ToolAnyCallback(termExecInput("rm -rf /"), nil)
+	if err == nil {
+		t.Fatalf("the denied command was not blocked")
+	}
+	if len(spy.commands) != 0 {
+		t.Fatalf("the command reached the terminal: %v", spy.commands)
+	}
+	if !strings.Contains(err.Error(), `command blocked by policy: "rm -rf /"`) {
+		t.Fatalf("the error does not name the blocked command: %v", err)
+	}
+	if !strings.Contains(err.Error(), `deny rule "rm -rf"`) {
+		t.Fatalf("the error does not name the matched deny rule: %v", err)
+	}
+}
+
+// TestTermExecuteCommandDenyBlockedWithApprovedForever covers the first half
+// of acceptance criterion 5: with the "Approved Forever" grant in place, a
+// denied command is still blocked and still never reaches the terminal.
+func TestTermExecuteCommandDenyBlockedWithApprovedForever(t *testing.T) {
+	setTestPolicy(t, wconfig.CommandPolicyConfigType{
+		Deny:  []string{"rm -rf"},
+		Allow: []string{"git status"},
+	})
+	spy := &termExecSpy{}
+	setTestRunner(t, spy)
+
+	opts := termExecChatOpts(true)
+	if approval := approvalFor(t, "rm -rf /tmp/foo", opts); approval != uctypes.ApprovalUserDenied {
+		t.Fatalf("approval = %q, want %q", approval, uctypes.ApprovalUserDenied)
+	}
+
+	toolDef := GetTermExecuteCommandToolDefinition("tab1")
+	if _, err := toolDef.ToolAnyCallback(termExecInput("rm -rf /tmp/foo"), nil); err == nil {
+		t.Fatalf("the denied command was not blocked")
+	}
+	if len(spy.commands) != 0 {
+		t.Fatalf("the command reached the terminal: %v", spy.commands)
+	}
+}
+
+// TestTermExecuteCommandAllowedReachesTerminal is the counterpart of the
+// blocked case: a command that is not denied still runs, and it runs even
+// when the policy sends it down the approval path.
+func TestTermExecuteCommandAllowedReachesTerminal(t *testing.T) {
+	setTestPolicy(t, wconfig.CommandPolicyConfigType{
+		Deny:  []string{"rm -rf"},
+		Allow: []string{"git status"},
+	})
+	spy := &termExecSpy{}
+	setTestRunner(t, spy)
+
+	toolDef := GetTermExecuteCommandToolDefinition("tab1")
+	if _, err := toolDef.ToolAnyCallback(termExecInput("git status"), nil); err != nil {
+		t.Fatalf("the allowed command was blocked: %v", err)
+	}
+	if len(spy.commands) != 1 || spy.commands[0] != "git status" {
+		t.Fatalf("the command did not reach the terminal: %v", spy.commands)
+	}
+}
+
+// TestTermExecuteCommandAllowSkipsApproval covers acceptance criterion 3:
 // an allowed command runs without an approval prompt.
 func TestTermExecuteCommandAllowSkipsApproval(t *testing.T) {
 	setTestPolicy(t, wconfig.CommandPolicyConfigType{

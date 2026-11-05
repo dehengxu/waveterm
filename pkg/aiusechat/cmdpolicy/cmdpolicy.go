@@ -9,10 +9,16 @@
 // approved terminal tool can run any command at all.
 //
 // The policy is a pair of prefix lists:
-//   - Deny: commands that are never auto-approved. A denied command always
-//     waits for an explicit user approval, even when the tool is on the
+//   - Deny: commands the AI must never execute. A denied command is rejected
+//     before it reaches the terminal, even when the tool is on the
 //     auto-approve list.
 //   - Allow: commands that may run without an approval prompt.
+//
+// The policy defines three tiers:
+//   - Allow hit: the AI runs the command without asking the user first.
+//   - Deny hit: the AI never runs the command. No approval unlocks it, not
+//     even the tool-level "Approved Forever" grant.
+//   - No hit: the default tier. Every single run needs a human confirmation.
 //
 // Matching rules:
 //   - Matching is case-insensitive.
@@ -41,8 +47,14 @@
 //     denied command hidden inside a quoted argument is not detected.
 //   - Obfuscation (base64, variable expansion, aliases, shell functions) is
 //     not decoded.
-//   - The policy is a guardrail, not a sandbox. It does not stop the user
-//     from typing a denied command by hand.
+//   - The policy is a guardrail for the AI tool, not a sandbox. It does not
+//     stop the user from typing a denied command by hand.
+//   - The deny list is matched by prefix, so a broad entry such as "rm -rf"
+//     also blocks "rm -rf ./build". A deny entry is an absolute block now,
+//     so the default list keeps such everyday removal commands out and only
+//     holds the entries that are hard to get wrong. A user who wants
+//     "rm -rf /" blocked for good adds it to the config themselves, and
+//     accepts that the prefix also hits "rm -rf /tmp/x".
 package cmdpolicy
 
 import (
@@ -56,6 +68,10 @@ import (
 type Decision struct {
 	// Denied is true when the command hits the deny list.
 	Denied bool
+	// DenyRule is the deny entry that matched, empty when nothing matched.
+	// It is reported back to the model so that the user can see which rule
+	// blocked the command and decide what to change.
+	DenyRule string
 	// Allowed is true when the command hits the allow list.
 	Allowed bool
 }
@@ -88,9 +104,11 @@ func policyFor(profile string) wconfig.CommandPolicyConfigType {
 // Decide evaluates a command against a policy. Deny wins over allow: a
 // command that hits both lists is denied.
 func Decide(command string, policy wconfig.CommandPolicyConfigType) Decision {
+	rule, denied := MatchDenyRule(command, policy.Deny)
 	return Decision{
-		Denied:  MatchDeny(command, policy.Deny),
-		Allowed: MatchAllow(command, policy.Allow),
+		Denied:   denied,
+		DenyRule: rule,
+		Allowed:  MatchAllow(command, policy.Allow),
 	}
 }
 
@@ -108,8 +126,17 @@ func IsAllowed(command string, policy wconfig.CommandPolicyConfigType) bool {
 // deny semantics: every part of a shell chain is checked and leading wrapper
 // commands are stripped. An empty list never matches.
 func MatchDeny(command string, entries []string) bool {
+	_, ok := MatchDenyRule(command, entries)
+	return ok
+}
+
+// MatchDenyRule reports whether the command hits any entry of the list and
+// returns the entry that matched. The entry is returned as the user wrote it
+// in the config (only trimmed), so that it can be shown back to the user.
+// An empty list never matches.
+func MatchDenyRule(command string, entries []string) (string, bool) {
 	if len(entries) == 0 || strings.TrimSpace(command) == "" {
-		return false
+		return "", false
 	}
 	candidates := denyCandidates(command)
 	for _, entry := range entries {
@@ -119,11 +146,11 @@ func MatchDeny(command string, entries []string) bool {
 		}
 		for _, cand := range candidates {
 			if matchEntry(e, cand) {
-				return true
+				return strings.TrimSpace(entry), true
 			}
 		}
 	}
-	return false
+	return "", false
 }
 
 // MatchAllow reports whether the command hits any entry of the list, using

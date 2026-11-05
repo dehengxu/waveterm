@@ -357,6 +357,11 @@ func runTermExecuteCommand(tabId string, input any) (*TermExecuteCommandToolOutp
 	return output, nil
 }
 
+// termExecuteRunner is the function that actually types a command into the
+// terminal. It is a package variable so that tests can replace it and prove
+// that a command blocked by the policy never reaches the terminal.
+var termExecuteRunner = runTermExecuteCommand
+
 func GetTermExecuteCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 	return uctypes.ToolDefinition{
 		Name:             "term_execute_command",
@@ -407,8 +412,12 @@ func GetTermExecuteCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 			}
 			decision := cmdpolicy.Decide(parsed.Command, cmdpolicy.PolicyForProfile(cmdpolicy.GlobalProfile))
 			if decision.Denied {
-				// Denied commands always need an explicit user approval.
-				return uctypes.ApprovalNeedsApproval
+				// A denied command is never executed, so there is nothing to
+				// approve. "user denied" instead of "needs approval" skips
+				// the approval round trip entirely: the user is not asked to
+				// confirm a command that will not run anyway. The command is
+				// blocked in ToolAnyCallback, before it reaches the terminal.
+				return uctypes.ApprovalUserDenied
 			}
 			if decision.Allowed {
 				// The allow list makes this command safe to run without a
@@ -418,7 +427,19 @@ func GetTermExecuteCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 			return uctypes.ApprovalNeedsApproval
 		},
 		ToolAnyCallback: func(input any, toolUseData *uctypes.UIMessageDataToolUse) (any, error) {
-			return runTermExecuteCommand(tabId, input)
+			// The deny list is a hard block: a denied command must not reach
+			// the terminal at all. The check lives here, in the execution
+			// path, because the approval flow cannot express "never run
+			// this": an approval value other than "needs approval" skips
+			// the approval wait, so the block has to happen where the
+			// command would be typed.
+			if parsed, err := parseTermExecuteCommandInput(input); err == nil {
+				decision := cmdpolicy.Decide(parsed.Command, cmdpolicy.PolicyForProfile(cmdpolicy.GlobalProfile))
+				if decision.Denied {
+					return nil, fmt.Errorf("command blocked by policy: %q matches deny rule %q; the user has to run it themselves or change the command policy", parsed.Command, decision.DenyRule)
+				}
+			}
+			return termExecuteRunner(tabId, input)
 		},
 	}
 }

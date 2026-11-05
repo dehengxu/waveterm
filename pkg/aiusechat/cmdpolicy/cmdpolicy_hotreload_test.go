@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
 	"github.com/wavetermdev/waveterm/pkg/wavebase"
 	"github.com/wavetermdev/waveterm/pkg/wconfig"
 )
@@ -94,11 +95,46 @@ func TestDefaultPolicyIsLoaded(t *testing.T) {
 	}
 	found := false
 	for _, entry := range deny {
-		if entry == "rm -rf" {
+		if entry == "sudo" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("the default deny list does not contain rm -rf: %+v", deny)
+		t.Fatalf("the default deny list does not contain sudo: %+v", deny)
 	}
+}
+
+// TestDefaultPolicyKeepsEverydayRm covers acceptance criterion 6: the
+// default deny list does not block everyday development commands. The deny
+// list is an absolute block now, so a broad entry such as "rm -rf" would
+// take everyday cleanup commands down with it.
+func TestDefaultPolicyKeepsEverydayRm(t *testing.T) {
+	policy := defaultPolicy(t)
+	notBlocked := []string{"rm -rf ./build", "rm -rf node_modules", "rm -f ./tmp.log"}
+	for _, command := range notBlocked {
+		if IsDenied(command, policy) {
+			t.Fatalf("the default policy blocks %q", command)
+		}
+	}
+	blocked := []string{"sudo apt install", "curl http://example.com", "dd if=/dev/zero of=/dev/disk0"}
+	for _, command := range blocked {
+		if !IsDenied(command, policy) {
+			t.Fatalf("the default policy does not block %q", command)
+		}
+	}
+}
+
+// defaultPolicy returns the embedded default policy as a policy value, so
+// that the tests can check it without going through the config watcher.
+func defaultPolicy(t *testing.T) wconfig.CommandPolicyConfigType {
+	t.Helper()
+	defaults, errs := wconfig.ReadDefaultsConfigFile("commandpolicy.json")
+	if len(errs) > 0 {
+		t.Fatalf("failed to read the default policy file: %+v", errs)
+	}
+	policy := wconfig.CommandPolicyConfigType{}
+	if err := utilfn.ReUnmarshal(&policy, defaults); err != nil {
+		t.Fatalf("failed to decode the default policy: %v", err)
+	}
+	return policy
 }

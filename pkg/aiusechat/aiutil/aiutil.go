@@ -269,12 +269,15 @@ func CreateToolUseData(toolCallID, toolName string, arguments string, chatOpts u
 		// session or permanently). Mark it auto-approved so the request skips
 		// the approval round trip entirely.
 		if toolUseData.Approval == uctypes.ApprovalNeedsApproval {
-			// The command policy deny list vetoes that grant. This check has
-			// to live here and not in ToolApproval: the upgrade below only
-			// happens for ApprovalNeedsApproval, so a tool that answers
-			// ApprovalNeedsApproval (which is what the terminal tool does for
-			// a denied command) would be turned into ApprovalAutoApproved
-			// right after, and the deny list would be a no-op.
+			// Second line of defense. The hard block for a denied command
+			// lives in the tool's execution callback, which refuses to type
+			// the command into the terminal. This check keeps the
+			// "Approved Forever" grant from upgrading a denied command even
+			// if some other path hands us ApprovalNeedsApproval for it: the
+			// upgrade below only happens for ApprovalNeedsApproval, so a
+			// tool that answers ApprovalNeedsApproval would be turned into
+			// ApprovalAutoApproved right after, and the deny list would be a
+			// no-op.
 			cmd := cmdpolicy.CommandFromToolInput(parsedArgs)
 			denied := cmd != "" && cmdpolicy.IsDenied(cmd, cmdpolicy.PolicyForProfile(cmdpolicy.GlobalProfile))
 			if !denied {

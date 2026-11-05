@@ -1,8 +1,5 @@
 {
   "deny": [
-    "rm -r",
-    "rm -rf",
-    "rm -fr",
     "sudo",
     "doas",
     "su",

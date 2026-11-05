@@ -381,10 +381,13 @@ type KeybindingsConfigType struct {
 
 // CommandPolicyConfigType holds the command-level policy that the AI terminal
 // tools apply to the commands they type into a terminal.
-//   - Deny lists command prefixes that are never auto-approved. A denied
-//     command always requires an explicit user approval, even when the user
+//   - Deny lists command prefixes the AI must never execute. A denied
+//     command is blocked before it reaches the terminal, even when the user
 //     permanently approved the tool.
 //   - Allow lists command prefixes that may run without an approval prompt.
+//
+// A command that hits neither list runs only after an explicit approval for
+// that single call. That is the default tier, so it needs no list of its own.
 //
 // Both lists are matched case-insensitively against the command text. An empty
 // list means "no restriction in that direction".
