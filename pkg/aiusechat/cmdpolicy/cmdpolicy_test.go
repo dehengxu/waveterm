@@ -166,3 +166,44 @@ func TestPolicyForProfileUsesTheProvider(t *testing.T) {
 		t.Fatalf("PolicyForProfile did not use the provider, got %+v", policy)
 	}
 }
+
+// TestMatchDenyRuleReportsTheEntry checks that the deny matcher reports which
+// entry blocked the command, so that the error the model sees can name the
+// rule the user has to change.
+func TestMatchDenyRuleReportsTheEntry(t *testing.T) {
+	entries := []string{"sudo", "rm -rf"}
+	rule, ok := MatchDenyRule("sudo rm -rf /", entries)
+	if !ok {
+		t.Fatalf("the command was not denied")
+	}
+	if rule != "sudo" {
+		t.Fatalf("rule = %q, want %q", rule, "sudo")
+	}
+	rule, ok = MatchDenyRule("rm -rf /tmp/foo", entries)
+	if !ok || rule != "rm -rf" {
+		t.Fatalf("rule = %q (denied=%v), want %q", rule, ok, "rm -rf")
+	}
+	if _, ok := MatchDenyRule("ls -la", entries); ok {
+		t.Fatalf("an unrelated command was denied")
+	}
+	if _, ok := MatchDenyRule("ls -la", nil); ok {
+		t.Fatalf("an empty entry list denied a command")
+	}
+}
+
+// TestDecideReportsTheDenyRule checks that the decision carries the matched
+// deny entry.
+func TestDecideReportsTheDenyRule(t *testing.T) {
+	policy := wconfig.CommandPolicyConfigType{Deny: []string{"curl"}}
+	decision := Decide("curl http://example.com", policy)
+	if !decision.Denied {
+		t.Fatalf("the command must be denied")
+	}
+	if decision.DenyRule != "curl" {
+		t.Fatalf("DenyRule = %q, want %q", decision.DenyRule, "curl")
+	}
+	decision = Decide("ls -la", policy)
+	if decision.Denied || decision.DenyRule != "" {
+		t.Fatalf("an unrelated command was denied: %+v", decision)
+	}
+}
