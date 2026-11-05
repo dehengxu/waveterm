@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/wavetermdev/waveterm/pkg/aiusechat/cmdpolicy"
 	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
 	"github.com/wavetermdev/waveterm/pkg/waveobj"
 	"github.com/wavetermdev/waveterm/pkg/wcore"
@@ -400,6 +401,20 @@ func GetTermExecuteCommandToolDefinition(tabId string) uctypes.ToolDefinition {
 		},
 		ToolVerifyInput: verifyTermExecuteCommandInput,
 		ToolApproval: func(input any) string {
+			parsed, err := parseTermExecuteCommandInput(input)
+			if err != nil {
+				return uctypes.ApprovalNeedsApproval
+			}
+			decision := cmdpolicy.Decide(parsed.Command, cmdpolicy.PolicyForProfile(cmdpolicy.GlobalProfile))
+			if decision.Denied {
+				// Denied commands always need an explicit user approval.
+				return uctypes.ApprovalNeedsApproval
+			}
+			if decision.Allowed {
+				// The allow list makes this command safe to run without a
+				// prompt.
+				return uctypes.ApprovalAutoApproved
+			}
 			return uctypes.ApprovalNeedsApproval
 		},
 		ToolAnyCallback: func(input any, toolUseData *uctypes.UIMessageDataToolUse) (any, error) {

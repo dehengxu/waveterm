@@ -379,6 +379,20 @@ type KeybindingsConfigType struct {
 	Functions map[string]string `json:"functions,omitempty"`
 }
 
+// CommandPolicyConfigType holds the command-level policy that the AI terminal
+// tools apply to the commands they type into a terminal.
+//   - Deny lists command prefixes that are never auto-approved. A denied
+//     command always requires an explicit user approval, even when the user
+//     permanently approved the tool.
+//   - Allow lists command prefixes that may run without an approval prompt.
+//
+// Both lists are matched case-insensitively against the command text. An empty
+// list means "no restriction in that direction".
+type CommandPolicyConfigType struct {
+	Deny  []string `json:"deny,omitempty"`
+	Allow []string `json:"allow,omitempty"`
+}
+
 type FullConfigType struct {
 	Settings       SettingsType                    `json:"settings" merge:"meta"`
 	MimeTypes      map[string]MimeTypeConfigType   `json:"mimetypes"`
@@ -391,6 +405,7 @@ type FullConfigType struct {
 	Bookmarks      map[string]WebBookmark          `json:"bookmarks"`
 	WaveAIModes    map[string]AIModeConfigType     `json:"waveai"`
 	Keybindings    KeybindingsConfigType           `json:"keybindings"`
+	CommandPolicy  CommandPolicyConfigType         `json:"commandpolicy"`
 	ConfigErrors   []ConfigError                   `json:"configerrors" configfile:"-"`
 	Version        string                          `json:"version" configfile:"-"`
 	BuildTime      string                          `json:"buildtime" configfile:"-"`

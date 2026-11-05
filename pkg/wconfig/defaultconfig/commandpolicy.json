@@ -1,0 +1,28 @@
+{
+  "deny": [
+    "rm -r",
+    "rm -rf",
+    "rm -fr",
+    "sudo",
+    "doas",
+    "su",
+    "curl",
+    "wget",
+    "mkfs",
+    "dd",
+    "dd if=",
+    "chmod 777",
+    "chmod -R 777",
+    "chown -R root",
+    "git push --force",
+    "git push -f",
+    "git reset --hard",
+    "git clean -f",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "diskutil"
+  ],
+  "allow": []
+}
