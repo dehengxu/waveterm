@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wavetermdev/waveterm/pkg/aiusechat/cmdpolicy"
 	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
 	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
 	"github.com/wavetermdev/waveterm/pkg/wcore"
@@ -268,10 +269,20 @@ func CreateToolUseData(toolCallID, toolName string, arguments string, chatOpts u
 		// session or permanently). Mark it auto-approved so the request skips
 		// the approval round trip entirely.
 		if toolUseData.Approval == uctypes.ApprovalNeedsApproval {
-			for _, autoTool := range chatOpts.AutoApproveTools {
-				if autoTool == toolName {
-					toolUseData.Approval = uctypes.ApprovalAutoApproved
-					break
+			// The command policy deny list vetoes that grant. This check has
+			// to live here and not in ToolApproval: the upgrade below only
+			// happens for ApprovalNeedsApproval, so a tool that answers
+			// ApprovalNeedsApproval (which is what the terminal tool does for
+			// a denied command) would be turned into ApprovalAutoApproved
+			// right after, and the deny list would be a no-op.
+			cmd := cmdpolicy.CommandFromToolInput(parsedArgs)
+			denied := cmd != "" && cmdpolicy.IsDenied(cmd, cmdpolicy.PolicyForProfile(cmdpolicy.GlobalProfile))
+			if !denied {
+				for _, autoTool := range chatOpts.AutoApproveTools {
+					if autoTool == toolName {
+						toolUseData.Approval = uctypes.ApprovalAutoApproved
+						break
+					}
 				}
 			}
 		}
