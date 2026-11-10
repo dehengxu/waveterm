@@ -1077,7 +1077,9 @@ async function quakeToggle() {
                 return;
             }
         }
-        if (window.isVisible()) {
+        // Only hide when the window is actually frontmost. If it is visible but
+        // behind other windows (or unfocused), bring it to the front instead.
+        if (window.isVisible() && window.isFocused()) {
             window.hide();
         } else {
             const targetDisplay = getDisplayForQuakeToggle();
