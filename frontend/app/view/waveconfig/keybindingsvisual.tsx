@@ -30,7 +30,7 @@ type GlobalHotkeyDef = {
 };
 
 const GlobalHotkeyDefs: GlobalHotkeyDef[] = [
-    { id: "window.toggle", label: "唤起 / 隐藏 Wave 窗口", hint: "显示或隐藏最近使用的 Wave 窗口" },
+    { id: "window.toggle", label: "唤起 / 隐藏 Wave 窗口", hint: "不在前台时唤起窗口；已在前台时隐藏" },
     { id: "window.new", label: "新建 Wave 窗口", hint: "打开一个全新的 Wave 窗口并聚焦" },
     { id: "window.focus", label: "聚焦最近窗口", hint: "只聚焦不隐藏，等同于「回到 Wave」" },
     { id: "ai.focus", label: "聚焦 AI 输入框", hint: "唤起窗口并把光标放进 Wave AI 输入框" },
