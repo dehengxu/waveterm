@@ -505,6 +505,12 @@ declare global {
         message: string;
     };
 
+    // wconfig.CommandPolicyConfigType
+    type CommandPolicyConfigType = {
+        deny?: string[];
+        allow?: string[];
+    };
+
     // wshrpc.CommandPublishAppData
     type CommandPublishAppData = {
         appid: string;
@@ -1020,6 +1026,7 @@ declare global {
         bookmarks: {[key: string]: WebBookmark};
         waveai: {[key: string]: AIModeConfigType};
         keybindings: KeybindingsConfigType;
+        commandpolicy: CommandPolicyConfigType;
         configerrors: ConfigError[];
         version: string;
         buildtime: string;
